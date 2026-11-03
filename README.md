@@ -62,6 +62,10 @@
 
 ## 安装
 
+> 插件市场：条目位于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（`tools` 分类）；仓库根目录的 `screenshots.json` 用于市场详情页展示截图。
+
+## 安装
+
 需要先安装并登录 DWS CLI（`dws auth login`）。
 
 ```bash
