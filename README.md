@@ -64,6 +64,16 @@
 
 包名：`@ahao430/dsh-workhub`（工作区目录形式的 bundle，`dsh.bundle` 指向 `cordis.patch.yml`）。
 
+**从 npm 安装（推荐）：**
+
+```bash
+dsh plugin add @ahao430/dsh-workhub        # 装进当前 profile
+```
+
+**从 GitHub 源码安装：**
+
+在 DSH 中用 `plugin_manager` 的 `install_bundle` 指向本仓库目录（或 `dsh plugin add github:ahao430/dsh-workhub`），随后用 `set_plugin` 启用 `workhub` 行。
+
 
 
 > 插件市场：条目位于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（`tools` 分类）；仓库根目录的 `screenshots.json` 用于市场详情页展示截图。

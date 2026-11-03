@@ -1,9 +1,30 @@
 {
   "name": "@ahao430/dsh-workhub",
   "version": "0.1.0",
-  "private": true,
+  "description": "Personal work-intelligence hub for DingTalk and Yunxiao inside DeepSeek Harness: syncs work data into local SQLite and exposes dashboards, a work calendar, project analysis, reports and workhub_* agent tools.",
   "type": "module",
-  "description": "WorkHub - personal work hub panel for DingTalk data via DWS (Milestone 1 spike)",
+  "license": "MIT",
+  "author": {
+    "name": "ahao430",
+    "url": "https://github.com/ahao430"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahao430/dsh-workhub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ahao430/dsh-workhub/issues"
+  },
+  "homepage": "https://github.com/ahao430/dsh-workhub#readme",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dingtalk",
+    "yunxiao",
+    "workhub",
+    "productivity",
+    "dashboard"
+  ],
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -14,10 +35,12 @@
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "lib/**/*.js",
-    "locale/en.json",
-    "locale/zh.json",
-    "icon.svg"
+    "lib",
+    "locale",
+    "icon.svg",
+    "screenshots.json",
+    "docs/screens/*.png",
+    "assets/icon-180.png"
   ],
   "dsh": {
     "bundle": {
@@ -28,5 +51,9 @@
       "immediately": true,
       "inject": []
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
