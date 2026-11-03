@@ -1,5 +1,8 @@
 # WorkHub · 钉钉 × 云效 个人工作智能台
 
+[![npm](https://img.shields.io/npm/v/@ahao430/dsh-workhub?label=npm)](https://www.npmjs.com/package/@ahao430/dsh-workhub)
+[![license](https://img.shields.io/npm/l/@ahao430/dsh-workhub)](LICENSE)
+
 把钉钉与云效的工作数据聚合到本地，用确定性统计看清工作全貌，用 AI 总结回溯每件事的来源。
 
 > 钉钉和云效记录工作，WorkHub 帮你看清工作如何发生、如何推进，以及下一步该做什么。
