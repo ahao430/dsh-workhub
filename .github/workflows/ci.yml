@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: 语法 · 渲染 · 物料
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 语法检查
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check client.js
+          find lib -name '*.js' -print0 | xargs -0 -n1 node --check
+          find tests -name '*.mjs' -print0 | xargs -0 -n1 node --check
+
+      - name: 渲染冒烟测试（8 个页面 + 数据子组件）
+        run: node tests/render-check.mjs
+
+      - name: 发布物料完整性
+        run: node tests/manifest-check.mjs

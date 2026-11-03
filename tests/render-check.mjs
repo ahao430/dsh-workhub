@@ -115,7 +115,8 @@ let failed = 0
 for (const [id, label, Comp] of PAGES) {
   const errors = []
   try {
-    const props = id === 'dashboard' ? { range, setRange: () => {} } : id === 'efficiency' ? { range } : null
+    // 统一传入 range/setRange：页面各取所需，避免新增时间范围页时因 props 为 null 误报。
+    const props = { range, setRange: () => {} }
     renderTree(Comp(props), label, errors)
     if (errors.length) {
       failed++

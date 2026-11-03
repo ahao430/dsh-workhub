@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@ahao430/dsh-workhub?label=npm)](https://www.npmjs.com/package/@ahao430/dsh-workhub)
 [![license](https://img.shields.io/npm/l/@ahao430/dsh-workhub)](LICENSE)
+[![CI](https://github.com/ahao430/dsh-workhub/actions/workflows/ci.yml/badge.svg)](https://github.com/ahao430/dsh-workhub/actions/workflows/ci.yml)
 
 把钉钉与云效的工作数据聚合到本地，用确定性统计看清工作全貌，用 AI 总结回溯每件事的来源。
 
@@ -27,7 +28,7 @@
 - **工作效能**：周×小时热力图、时段分布、协作对象 Top 榜单
 - **智能报告**：规则版周报/日报即时生成（工作概况 / 逐日概览 / 代码推进 / 排期节点 / 沟通协作 / 产出 / 风险 / 下周计划），支持导出 Markdown 与删除
 - **快捷执行**：云效流水线运行（二次确认 + 操作审计日志）
-- **Agent 工具**：14 个 `workhub_*` 工具，全部只读或带确认；AI 洞察与总结强制携带来源证据
+- **Agent 工具**：15 个 `workhub_*` 工具，全部只读或带确认；AI 洞察与总结强制携带来源证据
 
 ## 界面预览
 
@@ -147,6 +148,7 @@ dsh-workhub/
 ```bash
 node --check client.js                  # 语法检查
 node tests/render-check.mjs             # 渲染冒烟测试（8 个页面 + 数据子组件）
+node tests/manifest-check.mjs           # 发布物料检查（清单 / files / 本地化 / 截图）
 node tests/screenshot.mjs               # 用合成数据生成 docs/screens/*.html（再用无头浏览器转 PNG）
 ```
 
@@ -155,6 +157,20 @@ node tests/screenshot.mjs               # 用合成数据生成 docs/screens/*.h
 - 客户端只用 DSH 主题 token（`--dsw-alias-*`）做背景/边框/正文，强调色使用插件自有高对比色板（保证浅色/深色主题都清晰）；
 - 所有钉钉调用集中经过 `DwsExecutor`，参数由白名单生成，禁止拼接 shell 字符串；
 - 统计指标一律由 SQL 聚合产生，LLM 只做解释，且结论必须带来源。
+
+## 发布
+
+日常提交由 `.github/workflows/ci.yml` 自动跑语法检查、渲染冒烟测试和物料检查。发版走 tag：
+
+```bash
+# 1. 改 package.json 的 version（如 0.1.1），提交推送
+git commit -am "chore: 0.1.1" && git push
+
+# 2. 打 tag 并推送，Actions 会校验版本一致后发布到 npm
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+`Publish` 工作流会 `npm publish --access public --provenance`，因此需要仓库 Secret `NPM_TOKEN`（npmjs.com → Access Tokens → **Automation** 类型，可跳过 OTP）。未配置 Secret 时仍可本地手动发布：`npm publish --access public`。
 
 ## 路线图
 
