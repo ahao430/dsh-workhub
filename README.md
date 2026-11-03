@@ -84,6 +84,15 @@
 
 若 PAT 在某处泄露，请在云效侧轮换：生成新 Token 后在卡片里覆盖保存即可。
 
+## 凭证过期怎么办
+
+DWS 的 access token 约 2 小时一换，由 refresh token（约 30 天）自动续期，通常无感。refresh token 过期或被撤销后：
+
+- **WorkHub 面板**：数据管理 → 钉钉卡片会变成红色「登录已失效 · 需重新登录」，并提供 **一键重新登录** 按钮（DSH Host 与本机同机，`dws auth login` 会自动打开浏览器完成 OAuth Loopback 授权，完成后面板自动刷新）
+- 浏览器无法弹出时，卡片上保留 `dws auth login` 命令与复制按钮，可在终端执行
+- 驾驶舱会出现一条 high 级洞察「钉钉登录已失效」，定时同步在重登前自动暂停（避免刷失败日志）
+- **历史数据全程可读**：驾驶舱、日历、报告读的是本地 SQLite，只是不再增量更新
+
 ## 数据与隐私
 
 - 所有数据仅存本地：`$DSH_PROFILE_DIR/workhub/data.db`（无 `DSH_PROFILE_DIR` 时回退 `~/.dsh/workhub/data.db`），SQLite `node:sqlite`。

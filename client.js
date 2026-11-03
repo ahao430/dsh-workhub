@@ -567,7 +567,83 @@ window.__ModuleLoader__.load({
             yx?.tokenStored ? h(Btn, { variant: 'ghost', disabled: busy, onClick: () => save(true) }, '断开连接') : null)))
     }
 
-    function ReloginHint({ command }) {
+    function DingTalkLoginButton({ onDone, variant = 'primary', label = '重新登录钉钉' }) {
+      const [job, setJob] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const [msg, setMsg] = useState(null)
+      const timerRef = React.useRef(null)
+
+      const stopPolling = () => {
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+      }
+      useEffect(() => stopPolling, [])
+
+      const poll = () => {
+        stopPolling()
+        timerRef.current = setInterval(async () => {
+          try {
+            const r = await api('/auth/dingtalk/login/status')
+            setJob(r.job)
+            if (!r.job || r.job.status !== 'running') {
+              stopPolling()
+              setBusy(false)
+              if (r.job?.status === 'done') {
+                setMsg('登录成功，正在刷新连接状态…')
+                onDone?.()
+              } else if (r.job?.status === 'error') {
+                setMsg(`登录未完成：${r.job.error ?? '未知原因'}`)
+              }
+            }
+          } catch (e) {
+            stopPolling(); setBusy(false); setMsg(`状态查询失败：${e.message}`)
+          }
+        }, 2000)
+      }
+
+      const start = async () => {
+        if (!window.confirm('将打开浏览器进行钉钉授权（OAuth Loopback）。\n\n授权完成后会自动回到本页，无需终端操作。继续？')) return
+        setBusy(true); setMsg(null); setJob(null)
+        try {
+          const r = await api('/auth/dingtalk/login', { method: 'POST', body: '{}' })
+          setJob(r.job ?? null)
+          if (r.status === 'running') poll()
+          else { setBusy(false); setMsg('已有登录流程在进行中') }
+        } catch (e) {
+          setBusy(false); setMsg(`启动失败：${e.message}`)
+        }
+      }
+
+      const cancel = async () => {
+        try { await api('/auth/dingtalk/login/cancel', { method: 'POST', body: '{}' }) } catch {}
+        stopPolling(); setBusy(false); setMsg('已取消登录')
+      }
+
+      const running = busy || job?.status === 'running'
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+        h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+          h(Btn, { size: 'sm', variant, disabled: running, onClick: start },
+            running ? '等待浏览器授权…' : label),
+          running ? h(Btn, { size: 'sm', variant: 'ghost', onClick: cancel }, '取消') : null,
+          job?.url
+            ? h(Btn, {
+                size: 'sm',
+                onClick: () => window.open(job.url, '_blank', 'noopener'),
+              }, '打开授权页面')
+            : null),
+        running
+          ? h('div', { className: 'wh-muted' },
+              '已在本机启动授权流程：浏览器会自动打开钉钉登录页，扫码授权后本页自动刷新。若浏览器未弹出，点「打开授权页面」。')
+          : null,
+        job?.code ? h('div', { className: 'wh-muted' }, `设备码：${job.code}`) : null,
+        msg
+          ? h('div', {
+              className: 'wh-muted',
+              style: { color: msg.startsWith('登录成功') ? 'var(--wh-ok)' : msg.startsWith('已取消') ? null : 'var(--wh-bad)' },
+            }, msg)
+          : null)
+    }
+
+    function ReloginHint({ command, onRelogin }) {
       const [copied, setCopied] = useState(false)
       const copy = () => {
         if (navigator.clipboard?.writeText) {
@@ -588,6 +664,9 @@ window.__ModuleLoader__.load({
           '钉钉登录已失效，需要重新登录'),
         h('div', { className: 'wh-muted', style: { marginBottom: 8 } },
           '在终端执行下面命令并扫码，完成后回到本页点「全部同步」即可恢复（历史数据不受影响）。'),
+        h('div', { className: 'wh-toolbar', style: { gap: 6, marginBottom: 8 } },
+          h(DingTalkLoginButton, { onDone: onRelogin, label: '一键重新登录' })),
+        h('div', { className: 'wh-muted', style: { marginBottom: 4 } }, '若浏览器无法打开，也可在终端执行：'),
         h('div', { className: 'wh-toolbar', style: { gap: 6 } },
           h('code', {
             style: {
@@ -629,7 +708,13 @@ window.__ModuleLoader__.load({
               ? h('div', { className: 'wh-muted', style: { marginTop: 8 } },
                   'access token 已过期，DWS 会在下次调用时用 refresh token 自动续期，无需处理。')
               : null,
-            dd.reloginCommand ? h(ReloginHint, { command: dd.reloginCommand }) : null),
+            dd.reloginCommand
+              ? h(ReloginHint, { command: dd.reloginCommand, onRelogin: load })
+              : null,
+            !dd.reloginCommand
+              ? h('div', { style: { marginTop: 10 } },
+                  h(DingTalkLoginButton, { onDone: load, variant: 'ghost', label: '重新登录 / 切换组织' }))
+              : null),
           h(YunxiaoCard, { sources, onChanged: load })),
         h(Card, { title: '数据能力矩阵', sub: '各数据源最近一次同步结果' },
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },

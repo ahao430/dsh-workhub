@@ -29,5 +29,8 @@ export function apply(ctx) {
 
   registerWorkHubTools(ctx, router)
 
-  return () => router.db.close()
+  return () => {
+    try { router.dispose?.() } catch {}
+    router.db.close()
+  }
 }
