@@ -137,7 +137,10 @@ window.__ModuleLoader__.load({
 .wh-cal-strength{height:3px;border-radius:2px 2px 0 0;margin:auto -9px 0;transition:background .2s ease}
 .wh-cal-cell:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}
 .wh-cal-cell.sel{border-color:var(--wh-accent);box-shadow:0 0 0 1px var(--wh-accent) inset}
+.wh-cal-cell.today{background:var(--wh-accent-soft);border-color:color-mix(in srgb, var(--wh-accent) 42%, transparent)}
 .wh-cal-cell.today .wh-cal-day{color:var(--wh-accent);font-weight:700}
+.wh-cal-today{display:inline-flex;align-items:center;padding:0 5px;border-radius:5px;
+  background:var(--wh-accent);color:#fff;font-size:9.5px;font-weight:700;line-height:15px;letter-spacing:.02em}
 .wh-cal-cell.blank{background:transparent;border-color:transparent;cursor:default}
 .wh-cal-top{display:flex;align-items:center;justify-content:space-between}
 .wh-cal-day{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -206,11 +209,12 @@ window.__ModuleLoader__.load({
       git_repo: '#8A94A6',
       yunxiao_project: '#5C7A99',
       milestone: '#D9483B',
+      calendar_event: '#3F8CAD',
     }
     const TYPE_LABEL = {
       todo: '待办', report: '日志', minutes: '会议', chat_message: '消息', attendance: '打卡',
       commit: '提交', requirement: '需求', task: '任务', pipeline: '流水线', worklog: '报工',
-      git_repo: '仓库', yunxiao_project: '云效项目', milestone: '排期节点',
+      git_repo: '仓库', yunxiao_project: '云效项目', milestone: '排期节点', calendar_event: '日程',
     }
     const typeLabel = (t) => TYPE_LABEL[t] ?? t
     const typeColor = (t) => C[t] ?? 'var(--dsw-alias-state-idle-primary)'
@@ -704,7 +708,7 @@ window.__ModuleLoader__.load({
         msg ? h('div', { className: 'wh-card', style: { fontSize: 12, wordBreak: 'break-all' } }, msg) : null,
         h(Card, {
           title: '同步状态',
-          sub: '11 个数据源 · 定时每 30 分钟增量同步',
+          sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
           action: h(Btn, { variant: 'primary', disabled: !!busy, onClick: () => run('all') },
             busy === 'all' ? '同步中…' : '全部同步'),
         },
@@ -1156,6 +1160,35 @@ window.__ModuleLoader__.load({
           : null,
       ].filter(Boolean)
 
+      const meetingNotes = data.meetings ?? []
+      const noteCard = (m, i) => {
+        const parts = [
+          h('div', { className: 'wh-insight-head', key: 'head' },
+            h('span', { className: 'wh-insight-title' }, m.title),
+            m.durationMinutes ? h(Chip, { tone: 'neutral' }, `${m.durationMinutes} 分钟`) : null),
+        ]
+        if (m.summary) {
+          parts.push(h('div', { key: 'sum', style: { marginTop: 5, lineHeight: 1.55, fontSize: 12.5 } }, m.summary))
+        }
+        if ((m.keywords ?? []).length) {
+          parts.push(h('div', { key: 'kw', className: 'wh-tags', style: { marginTop: 6 } },
+            m.keywords.map((k) => h(Chip, { key: k, tone: 'neutral' }, k))))
+        }
+        if ((m.actions ?? []).length) {
+          parts.push(h('div', { key: 'act', style: { marginTop: 8 } },
+            h('div', { className: 'wh-section-title' }, '行动项'),
+            m.actions.map((a, j) => h('div', { key: j, style: { fontSize: 12.5, padding: '2px 0' } }, `· ${a}`))))
+        }
+        return h('div', { key: i, className: 'wh-insight', style: { borderLeftColor: 'var(--wh-accent)' } }, parts)
+      }
+      const meetingBlock = meetingNotes.length
+        ? h(Card, {
+            title: `会议纪要 · ${meetingNotes.length}`,
+            sub: 'AI 听记摘要与行动项（来自钉钉听记 / 日程）',
+          },
+            h('div', { className: 'wh-list' }, meetingNotes.map(noteCard)))
+        : null
+
       const milestones = (data.events ?? []).filter((e) => e.sourceType === 'milestone')
       const milestoneBlock = milestones.length
         ? h(Card, {
@@ -1293,6 +1326,7 @@ window.__ModuleLoader__.load({
           summaryBlock,
           ...extraBlocks),
         milestoneBlock,
+        meetingBlock,
         h(Card, { title: `工作事件时间线 · ${data.events.length}`, sub: '按发生时间排列 · 点击可对照原始来源' },
           timeline))
     }
@@ -1368,7 +1402,9 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'wh-cal-top' },
           h('span', { className: 'wh-cal-day' }, String(Number(date.slice(8)))),
-          d?.hasSummary ? h('span', { style: { color: 'var(--wh-accent)', fontSize: 10 } }, '✦') : null),
+          isToday
+            ? h('span', { className: 'wh-cal-today' }, '今日')
+            : d?.hasSummary ? h('span', { style: { color: 'var(--wh-accent)', fontSize: 10 } }, '✦') : null),
         hasAtt
           ? h('div', { className: 'wh-cal-att' },
               h('span', { className: 'wh-cal-att-time' }, d.checkIn ?? '--:--'),
@@ -1453,7 +1489,7 @@ window.__ModuleLoader__.load({
               h('option', { value: '' }, '全部项目'),
               projects.map((p) => h('option', { key: p.id, value: p.id }, p.name))))),
         h('div', { className: 'wh-muted', style: { marginTop: -6 } },
-          '✦ 品牌色圆点 = 已有 AI 总结 · 其他圆点 = 当日活动类型'),
+          '✦ = 已有 AI 总结 · 卡片展示打卡时段 / 报工时长 / 当日主力需求'),
         view === 'month'
           ? h('div', null,
               h('div', { className: 'wh-cal-head' },
@@ -1995,7 +2031,7 @@ window.__ModuleLoader__.load({
     }
 
     // debug/testing hook: page components for smoke tests
-    window.__WORKHUB_DEBUG__ = { PAGES, TimeBar, SourcesSection, ProjectDetail, DayPanel, TopicsSection, Heatmap, InsightCard, Stat, Ui: null }
+    window.__WORKHUB_DEBUG__ = { PAGES, TimeBar, SourcesSection, ProjectDetail, DayPanel, TopicsSection, ChatSummarySection, Heatmap, InsightCard, Stat, Card, Btn, CSS }
 
     return {
       inject: ['slots'],
