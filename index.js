@@ -14,8 +14,15 @@ export function apply(ctx) {
   // Scheduled incremental sync (v2 §3.3): every 30 minutes; failures land in
   // sync_state and never throw out of the timer.
   ctx.effect(() => {
-    const timer = setInterval(() => {
-      router.sync.run('all').then(() => router.sync.runWatchdog()).catch(() => {})
+    const timer = setInterval(async () => {
+      // 需要重新登录时跳过同步（避免每 30 分钟刷失败日志），只让 Watchdog 提示一次
+      const health = await router.dws.getHealth().catch(() => null)
+      if (health && health.refreshTokenValid === false) {
+        await router.sync.runWatchdog().catch(() => {})
+        return
+      }
+      await router.sync.run('all').catch(() => {})
+      await router.sync.runWatchdog().catch(() => {})
     }, 30 * 60 * 1000)
     return () => clearInterval(timer)
   })

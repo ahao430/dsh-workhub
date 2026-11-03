@@ -499,8 +499,9 @@ window.__ModuleLoader__.load({
     function StatusChip({ status }) {
       const map = {
         connected: ['已连接', 'ok'],
+        refreshing: ['access 过期 · 自动续期', 'warn'],
         disconnected: ['未连接', 'neutral'],
-        expired: ['已过期', 'warn'],
+        expired: ['登录已失效 · 需重新登录', 'bad'],
         error: ['异常', 'bad'],
       }
       const [label, tone] = map[status] || ['未知', 'neutral']
@@ -566,6 +567,38 @@ window.__ModuleLoader__.load({
             yx?.tokenStored ? h(Btn, { variant: 'ghost', disabled: busy, onClick: () => save(true) }, '断开连接') : null)))
     }
 
+    function ReloginHint({ command }) {
+      const [copied, setCopied] = useState(false)
+      const copy = () => {
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(command).then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          }).catch(() => {})
+        }
+      }
+      return h('div', {
+        style: {
+          marginTop: 10, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--wh-bad-soft)',
+          border: '1px solid color-mix(in srgb, var(--wh-bad) 30%, transparent)',
+        },
+      },
+        h('div', { style: { fontSize: 12, color: 'var(--wh-bad)', fontWeight: 600, marginBottom: 4 } },
+          '钉钉登录已失效，需要重新登录'),
+        h('div', { className: 'wh-muted', style: { marginBottom: 8 } },
+          '在终端执行下面命令并扫码，完成后回到本页点「全部同步」即可恢复（历史数据不受影响）。'),
+        h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+          h('code', {
+            style: {
+              flex: 1, padding: '4px 8px', borderRadius: 6, fontSize: 12,
+              background: 'var(--dsw-alias-bg-layer-1)',
+              border: '1px solid var(--dsw-alias-border-l1)',
+            },
+          }, command),
+          h(Btn, { size: 'sm', onClick: copy }, copied ? '已复制 ✓' : '复制命令')))
+    }
+
     function SourcesSection() {
       const [sources, setSources] = useState(null)
       const load = useCallback(() => api('/sources').then(setSources).catch(() => {}), [])
@@ -580,10 +613,23 @@ window.__ModuleLoader__.load({
               h('dt', null, '账号'), h('dd', null, h('b', null, dd.account ?? '—')),
               h('dt', null, '组织'), h('dd', null, dd.organization ?? '—'),
               h('dt', null, 'Profile'), h('dd', null, dd.profile ? `${dd.profile.count} 个` : '—'),
-              dd.expiresAt ? h('dt', null, 'Token 到期') : null,
-              dd.expiresAt ? h('dd', null, new Date(dd.expiresAt).toLocaleString()) : null,
+              dd.expiresAt ? h('dt', null, 'access token') : null,
+              dd.expiresAt
+                ? h('dd', null,
+                    new Date(dd.expiresAt).toLocaleString(),
+                    Number.isFinite(dd.minutesLeft) ? h('span', { className: 'wh-muted' }, ` · 剩 ${Math.max(0, dd.minutesLeft)} 分钟`) : null)
+                : null,
+              dd.refreshExpiresAt ? h('dt', null, 'refresh token') : null,
+              dd.refreshExpiresAt
+                ? h('dd', null, `${new Date(dd.refreshExpiresAt).toLocaleString()}（到期前自动续期）`)
+                : null,
               dd.lastError ? h('dt', null, '错误') : null,
-              dd.lastError ? h('dd', { style: { color: 'var(--wh-bad)' } }, dd.lastError) : null)),
+              dd.lastError ? h('dd', { style: { color: 'var(--wh-bad)' } }, dd.lastError) : null),
+            dd.selfHealing
+              ? h('div', { className: 'wh-muted', style: { marginTop: 8 } },
+                  'access token 已过期，DWS 会在下次调用时用 refresh token 自动续期，无需处理。')
+              : null,
+            dd.reloginCommand ? h(ReloginHint, { command: dd.reloginCommand }) : null),
           h(YunxiaoCard, { sources, onChanged: load })),
         h(Card, { title: '数据能力矩阵', sub: '各数据源最近一次同步结果' },
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
