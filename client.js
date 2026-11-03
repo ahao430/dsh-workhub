@@ -4,7 +4,7 @@
  * small primitive components (Card / Stat / Chip / Btn / Table / Empty).
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-workhub',
+  id: '@ahao430/dsh-workhub',
   factory(require) {
     const React = require('react')
     const { useState, useEffect, useCallback } = React

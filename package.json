@@ -1,5 +1,5 @@
 {
-  "name": "@local/dsh-workhub",
+  "name": "@ahao430/dsh-workhub",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,9 @@
     "icon.svg"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
