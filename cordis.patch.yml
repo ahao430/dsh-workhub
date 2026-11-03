@@ -1,0 +1,4 @@
+- insert:
+    - id: workhub
+      name: '@local/dsh-workhub'
+      config: {}

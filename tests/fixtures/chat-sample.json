@@ -1,0 +1,44 @@
+{
+  "complete": true,
+  "contractVersion": "im.message-list.v1",
+  "count": 3,
+  "decryptAllowedCount": 0,
+  "decryptCandidateCount": 0,
+  "decryptFailedCount": 0,
+  "decryptedCount": 0,
+  "enrichedCount": 0,
+  "failedCount": 0,
+  "failures": [],
+  "hasMore": false,
+  "identityResult": {
+    "hint": "Compare messages[].senderId, never messages[].sender display names.",
+    "negativeConclusionAllowed": false,
+    "status": "requires_query_check"
+  },
+  "messages": [
+    {
+      "conversationId": "cidExampleConversationAAAAAAAAAAAAAA==",
+      "createTime": "2026-01-05 10:12:00",
+      "messageId": "msgExampleMessageAAAAAAAAAAAA0001==",
+      "sender": "张三",
+      "senderId": "10000000000000001",
+      "text": "### 需求排期通知\n- DEMO-101 示例需求：已完成系分，今天进入开发\n- 计划提测：2026-01-08"
+    },
+    {
+      "conversationId": "cidExampleConversationAAAAAAAAAAAAAA==",
+      "createTime": "2026-01-05 10:15:30",
+      "messageId": "msgExampleMessageAAAAAAAAAAAA0002==",
+      "sender": "李四",
+      "senderId": "10000000000000002",
+      "text": "DEMO-101 的开发环境配置我还需要确认一下，稍后同步"
+    },
+    {
+      "conversationId": "cidExampleConversationAAAAAAAAAAAAAA==",
+      "createTime": "2026-01-05 10:18:02",
+      "messageId": "msgExampleMessageAAAAAAAAAAAA0003==",
+      "sender": "张三",
+      "senderId": "10000000000000001",
+      "text": "好的，下午 3 点前给结论；如果环境没问题，明天开始自测"
+    }
+  ]
+}
