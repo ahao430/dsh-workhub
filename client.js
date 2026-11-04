@@ -1633,8 +1633,11 @@ window.__ModuleLoader__.load({
               h('span', { className: 'wh-cal-att-time' }, d.checkIn ?? '--:--'),
               d.checkOut ? h('span', { className: 'wh-cal-att-sep' }, '–') : null,
               d.checkOut ? h('span', { className: 'wh-cal-att-time' }, d.checkOut) : null,
-              d.attendanceComplete ? null : h('span', { className: 'wh-cal-att-warn', title: '仅一次打卡，可能缺卡' }, '!'))
-          : null,
+              d.attendanceComplete ? null : h('span', { className: 'wh-cal-att-warn', title: '仅一次打卡，可能缺卡' }, '单次'))
+          : date <= todayIso && ![0, 6].includes(new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))).getDay())
+            ? h('div', { className: 'wh-cal-att' },
+                h('span', { className: 'wh-cal-att-time', style: { opacity: 0.55 } }, '未打卡'))
+            : null,
         hasWl
           ? h('div', { className: 'wh-cal-wl' }, `报工 ${d.worklogHours}h`)
           : null,
