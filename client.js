@@ -503,10 +503,13 @@ window.__ModuleLoader__.load({
         (stats.inProgress ?? []).length
           ? h(Card, {
               title: `进行中需求 · ${stats.inProgress.length}`,
-              sub: `${stats.range.startDate} ~ ${stats.range.endDate} 内有更新 · 非终态需求，按最近更新倒序`,
+              sub: `${stats.range.startDate} ~ ${stats.range.endDate} 内有更新 · 只看与我相关 · 非终态，按最近更新倒序`,
             },
               stats.inProgress.map((r) => h(RequirementRow, { key: r.source_id, r })))
-          : null,
+          : stats.identityConfigured === false
+            ? h(Card, { title: '进行中需求' },
+                h(Empty, { icon: '◎', title: '未配置「我的身份」', hint: '到「数据管理 → 我的身份」填入你的名字，这里只显示与你相关的进行中需求' }))
+            : null,
         cmp
           ? h(Card, {
               title: '周期对比',
@@ -780,6 +783,26 @@ window.__ModuleLoader__.load({
       const [items, setItems] = useState(null)
       const [sourceFilter, setSourceFilter] = useState('')
       const [chatQuery, setChatQuery] = useState('')
+      const [identity, setIdentity] = useState(null)
+      const [idDraft, setIdDraft] = useState('')
+      const [idBusy, setIdBusy] = useState(false)
+
+      useEffect(() => {
+        void api('/identity')
+          .then((r) => { setIdentity(r); setIdDraft((r.actors ?? []).join(', ')) })
+          .catch(() => {})
+      }, [])
+
+      const saveIdentity = async () => {
+        setIdBusy(true)
+        try {
+          const actors = idDraft.split(/[,，、\s]+/).filter(Boolean)
+          const r = await api('/identity', { method: 'POST', body: JSON.stringify({ actors }) })
+          setIdentity((p0) => ({ ...(p0 ?? {}), actors: r.actors }))
+          setIdDraft(r.actors.join(', '))
+          setMsg('已保存我的身份，进行中需求将只显示与你相关的')
+        } catch (e) { setMsg(`身份保存失败: ${e.message}`) } finally { setIdBusy(false) }
+      }
 
       const loadStatus = useCallback(
         () => api('/sync/status').then(setStatus).catch((e) => setMsg(String(e.message))),
@@ -880,6 +903,32 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'wh-content' },
         h(SourcesSection),
         msg ? h('div', { className: 'wh-card', style: { fontSize: 12, wordBreak: 'break-all' } }, msg) : null,
+        h(Card, {
+          title: '我的身份',
+          sub: '进行中需求只显示与你相关的：钉钉名 / 云效提交署名，多个用逗号分隔',
+        },
+          h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
+            h('input', {
+              className: 'wh-input', style: { flex: 1, minWidth: 220 },
+              placeholder: '如：王闻浩, 王昊（钉钉名、git 署名都填上）', value: idDraft,
+              onChange: (e) => setIdDraft(e.target.value),
+            }),
+            h(Btn, { size: 'sm', variant: 'primary', disabled: idBusy, onClick: saveIdentity },
+              idBusy ? '保存中…' : '保存身份')),
+          (identity?.candidates ?? []).length
+            ? h('div', { style: { marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+                h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '常见提交署名（点击添加）：'),
+                identity.candidates.map((c) =>
+                  h(Chip, {
+                    key: c,
+                    tone: (identity.actors ?? []).includes(c) ? 'brand' : 'neutral',
+                    style: { cursor: 'pointer' },
+                    onClick: () => {
+                      const cur = idDraft.split(/[,，、\s]+/).filter(Boolean)
+                      if (!cur.includes(c)) setIdDraft([...cur, c].join(', '))
+                    },
+                  }, c)))
+            : null),
         h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
@@ -1008,10 +1057,13 @@ window.__ModuleLoader__.load({
         (data.inProgress ?? []).length
           ? h(Card, {
               title: `进行中需求 · ${data.inProgress.length}`,
-              sub: `${data.range.startDate} ~ ${data.range.endDate} 内有更新 · 非终态需求`,
+              sub: `${data.range.startDate} ~ ${data.range.endDate} 内有更新 · 只看与我相关 · 非终态需求`,
             },
               data.inProgress.map((r) => h(RequirementRow, { key: r.source_id, r })))
-          : null,
+          : data.identityConfigured === false
+            ? h(Card, { title: '进行中需求' },
+                h(Empty, { icon: '◎', title: '未配置「我的身份」', hint: '到「数据管理 → 我的身份」填入你的名字，这里只显示与你相关的进行中需求' }))
+            : null,
         h(Card, { title: 'AI 洞察与分析' },
           (data.insights ?? []).length
             ? h('div', { className: 'wh-list' }, data.insights.map((a) => h(InsightCard, { key: a.id, a })))
@@ -1102,7 +1154,7 @@ window.__ModuleLoader__.load({
         (inprog?.groups ?? []).length
           ? h(Card, {
               title: `进行中需求 · ${inprog.groups.reduce((a, g) => a + g.total, 0)} 项 / ${inprog.groups.length} 个项目`,
-              sub: `${inprog.range?.startDate ?? ''} ~ ${inprog.range?.endDate ?? ''} 内有更新 · 每项目展示前 3 条`,
+              sub: `${inprog.range?.startDate ?? ''} ~ ${inprog.range?.endDate ?? ''} 内有更新 · 只看与我相关 · 每项目展示前 3 条`,
             },
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
                 inprog.groups.map((g) =>
@@ -1111,7 +1163,10 @@ window.__ModuleLoader__.load({
                       h('span', { style: { fontWeight: 550 } }, g.name),
                       h(Chip, { tone: 'brand' }, `进行中 ${g.total}`)),
                     g.items.map((r) => h(RequirementRow, { key: r.source_id, r }))))))
-          : null,
+          : inprog?.identityConfigured === false
+            ? h(Card, { title: '进行中需求' },
+                h(Empty, { icon: '◎', title: '未配置「我的身份」', hint: '到「数据管理 → 我的身份」填入你的名字，这里只显示与你相关的进行中需求' }))
+            : null,
         h(Card, { title: '新建项目' },
           h(ProjectForm, { chats: status?.chats ?? [], onCreated: load })),
         h('div', { className: 'wh-muted', style: { textAlign: 'center' } },
@@ -1531,11 +1586,13 @@ window.__ModuleLoader__.load({
         ...extraBlocks)
       const inProgressCard = h(Card, {
         title: `进行中需求 · ${inProgress.length}`,
-        sub: '当日有更新的非终态需求',
+        sub: '当日有更新 · 只看与我相关 · 非终态需求',
       },
         inProgress.length
           ? inProgress.map((r) => h(RequirementRow, { key: r.source_id, r }))
-          : h(Empty, { icon: '◇', title: '当日无进行中需求更新', hint: '切换更宽的时间范围可在驾驶舱查看更多' }))
+          : data.identityConfigured === false
+            ? h(Empty, { icon: '◎', title: '未配置「我的身份」', hint: '到「数据管理 → 我的身份」填入名字后只显示与你相关的需求' })
+            : h(Empty, { icon: '◇', title: '当日无进行中需求更新', hint: '切换更宽的时间范围可在驾驶舱查看更多' }))
       const timelineCard = h(Card, { title: `工作事件时间线 · ${data.events.length}`, sub: '按发生时间排列 · 点击可对照原始来源' },
         timeline)
 

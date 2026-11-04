@@ -54,6 +54,7 @@ const MOCK = {
       { id: 'p3', name: '示例项目 C', source_type: 'requirement', n: 5 },
     ],
     activeProjects: 3,
+    identityConfigured: true,
     inProgress: [
       { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
       { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-03' },
@@ -67,6 +68,7 @@ const MOCK = {
   },
   '/api/workhub/analytics/inprogress/grouped?': {
     range: { startDate: '2026-10-06', endDate: '2026-11-04' },
+    identityConfigured: true,
     groups: [
       { projectId: 'p1', name: '示例项目 A', total: 5, items: [
         { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
@@ -165,6 +167,7 @@ const MOCK = {
       sources: new Array(18).fill(0).map(() => ({ sourceType: 'commit' })),
       generatedAt: '2026-11-04T10:00:00Z',
     },
+    identityConfigured: true,
     inProgress: [
       { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
       { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-04' },
@@ -234,6 +237,7 @@ const MOCK = {
       commit: [{ id: 'c1', occurredAt: '2026-11-03', title: 'DEMO-101 接口适配：兼容旧版返回结构' }, { id: 'c2', occurredAt: '2026-11-02', title: 'DEMO-101 缓存层重构' }],
       requirement: [{ id: 'r1', occurredAt: '2026-11-02', title: 'DEMO-101 示例需求：接口兼容改造' }],
     },
+    identityConfigured: true,
     inProgress: [
       { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
       { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-03' },
@@ -286,6 +290,10 @@ const MOCK = {
       { name: '20261028141155-回滚', type: 'Rollback', state: 'FAILED', version: '20261028141155-28', sn: '186551c8557b4648a4bb4541a4f6180b', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'production', artifacts: {}, createdAt: '2026-10-28T06:11:55.000Z' },
     ],
     orchestration: { sha: '546566850fc09b1154938f85d79f5bff323787f1', message: '初始化编排', commitTime: '2026-10-22T09:28:52.000Z' },
+  },
+  '/api/workhub/identity': {
+    actors: ['王闻浩', '王昊'],
+    candidates: ['王昊', 'zengfa', 'sunyinwang', 'xtl', 'cabin', 'xiaoyaoyaoGitHub', 'liyang', 'yuandw'],
   },
   '/api/workhub/actions/appstack/prefs': {
     favorites: ['demo-web'],
