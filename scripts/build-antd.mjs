@@ -18,6 +18,7 @@ const entry = `
 export { Button, Input, Select, Form, Switch, Checkbox, Radio, DatePicker, TimePicker, InputNumber,
   Space, Divider, Row, Col, Segmented, Tooltip, Popconfirm, ConfigProvider, Tag, Alert, Spin, App as AntApp, theme } from 'antd'
 export { default as zhCN } from 'antd/locale/zh_CN'
+export { default as dayjs } from 'dayjs'
 `
 
 async function main() {
