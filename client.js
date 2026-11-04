@@ -781,24 +781,16 @@ react-is/cjs/react-is.production.js:
           : null)
     }
 
-    function Dashboard({ range, setRange }) {
+    function Dashboard({ range, setRange, scope = '' }) {
       const [stats, setStats] = useState(null)
       const [err, setErr] = useState(null)
-      const [groups, setGroups] = useState([])
-      const [groupView, setGroupView] = useState(viewMem.groupId)
       const insights = useInsights({ kind: 'insight' })
       const load = useCallback(() => {
-        return api(`/analytics/dashboard?${rangeQuery(range)}${viewMem.groupId ? `&groupId=${encodeURIComponent(viewMem.groupId)}` : ''}`)
+        return api(`/analytics/dashboard?${rangeQuery(range)}${scope ? `&groupId=${encodeURIComponent(scope)}` : ''}`)
           .then((r) => { setStats(r); setRange({ ...range, resolved: r.range }) })
           .catch((e) => setErr(String(e.message)))
-      }, [range.preset, range.start, range.end, range.granularity, range.compare])
+      }, [range.preset, range.start, range.end, range.granularity, range.compare, scope])
       useEffect(() => { void load() }, [load])
-      useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
-      const switchScope = (id) => {
-        viewMem.groupId = id
-        setGroupView(id)
-        void load()
-      }
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!stats) return h(Loading)
 
@@ -846,32 +838,7 @@ react-is/cjs/react-is.production.js:
         : []
 
       return h('div', { className: 'wh-content' },
-        groups.length
-          ? (() => {
-              const a = getAntd()
-              if (a) {
-                try {
-                  return h('div', { className: 'wh-toolbar', style: { gap: 8, alignItems: 'center' } },
-                    h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '视角'),
-                    h(a.Segmented, {
-                      size: 'small',
-                      value: groupView || '',
-                      options: [{ label: '我的', value: '' }, ...groups.map((g) => ({ label: g.name, value: g.id }))],
-                      onChange: (v) => switchScope(v),
-                    }))
-                } catch { /* 回退 Chip */ }
-              }
-              return h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
-                h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '视角'),
-                h(Chip, { tone: !groupView ? 'brand' : 'neutral', style: { cursor: 'pointer' }, onClick: () => switchScope('') }, '我的'),
-                groups.map((g) =>
-                  h(Chip, {
-                    key: g.id, tone: groupView === g.id ? 'brand' : 'neutral', style: { cursor: 'pointer' },
-                    onClick: () => switchScope(g.id),
-                  }, g.name)))
-            })()
-          : null,
-        groupView ? h(GroupView, { groupId: groupView, range }) : null,
+        scope ? h(GroupView, { groupId: scope, range }) : null,
         h('div', { className: 'wh-stats' }, statCards),
         h('div', { className: 'wh-grid2' },
           h(Card, { title: '项目投入分布', sub: `${stats.range.startDate} ~ ${stats.range.endDate}` },
@@ -3121,6 +3088,10 @@ react-is/cjs/react-is.production.js:
       const [page, setPage] = useState('dashboard')
       const [range, setRange] = useState({ preset: 'this_week', granularity: null, compare: false })
       const [dsStatus, setDsStatus] = useState(null)
+      const [groups, setGroups] = useState([])
+      const [scope, setScope] = useState(viewMem.groupId)
+      useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
+      const switchScope = (id) => { viewMem.groupId = id; setScope(id) }
       useEffect(() => {
         let alive = true
         const tick = () => api('/sources')
@@ -3147,13 +3118,40 @@ react-is/cjs/react-is.production.js:
         }, Icon ? h(Icon) : null, h('span', null, label)))
       }
 
+      const scopeOptions = [{ label: '我的', value: '' }, ...groups.map((g) => ({ label: g.name, value: g.id }))]
+      const scopeControl = (() => {
+        const a = getAntd()
+        if (a) {
+          try {
+            return h(a.Segmented, {
+              size: 'small', block: true,
+              value: scope || '',
+              options: scopeOptions,
+              onChange: (v) => switchScope(v),
+            })
+          } catch { /* 回退原生按钮 */ }
+        }
+        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } },
+          scopeOptions.map((o) =>
+            h('button', {
+              key: o.value || 'me',
+              className: (scope || '') === o.value ? 'wh-nav on' : 'wh-nav',
+              onClick: () => switchScope(o.value),
+            }, h('span', null, o.label))))
+      })()
+
       const sidebar = h('aside', { className: 'wh-side' },
         h('div', { className: 'wh-brand' },
           h('div', { className: 'wh-brand-mark' }, h(WorkHubIcon, { size: 16 })),
           h('div', null,
             h('div', { className: 'wh-brand-name' }, 'WorkHub'),
             h('div', { className: 'wh-brand-tag' }, '钉钉 × 云效 工作台'))),
-        nav)
+        nav,
+        groups.length
+          ? h('div', { style: { marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column', gap: 6 } },
+              h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '视角 · 进行中需求归属'),
+              scopeControl)
+          : null)
 
       const header = h('header', { className: 'wh-top' },
         h('div', null,
@@ -3166,7 +3164,7 @@ react-is/cjs/react-is.production.js:
         usesTime ? h(TimeBar, { range, onChange: setRange }) : null)
 
       const pageProps = current[0] === 'dashboard'
-        ? { range, setRange }
+        ? { range, setRange, scope }
         : current[0] === 'efficiency' || current[0] === 'reports' || current[0] === 'projects'
           ? { range }
           : null
@@ -3180,51 +3178,33 @@ react-is/cjs/react-is.production.js:
       return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main))
     }
 
-    /* 更新提示横幅：检测（git 落后数 / npm latest）→ 一键更新（git --ff-only pull） */
+    /* 更新提示横幅：只检测并提示，不做页面内自动更新（升级+重载由 DSH 助手或用户手动完成） */
     const updateMem = { at: 0, data: null }
 
     function UpdateBanner() {
       const [info, setInfo] = useState(null)
-      const [busy, setBusy] = useState(false)
-      const [msg, setMsg] = useState(null)
       useEffect(() => {
         if (updateMem.data && Date.now() - updateMem.at < 10 * 60_000) { setInfo(updateMem.data); return }
         void api('/update/check')
           .then((r) => { updateMem.data = r; updateMem.at = Date.now(); setInfo(r) })
           .catch(() => {})
       }, [])
-      if (!info) return null
-      const hasUpdate = !info.upToDate
-      if (!hasUpdate && !msg) return null
-      const apply = async () => {
-        setBusy(true)
-        try {
-          const r = await api('/update/apply', { method: 'POST', body: '{}' })
-          updateMem.data = r
-          updateMem.at = Date.now()
-          setInfo(r)
-          setMsg(r.note ?? '更新完成')
-        } catch (e) {
-          setMsg(`更新失败: ${e.message}`)
-        } finally { setBusy(false) }
-      }
+      if (!info || info.upToDate) return null
       return h('div', {
         className: 'wh-card',
-        style: { marginBottom: 10, padding: '8px 12px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, borderColor: hasUpdate ? 'var(--wh-accent)' : undefined },
+        style: { marginBottom: 10, padding: '8px 12px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, borderColor: 'var(--wh-accent)' },
       },
-        hasUpdate
-          ? h('span', { style: { fontWeight: 550 } },
-              `⬆ 有更新（当前 ${info.current ?? '?'}）`,
-              info.behind ? ` · 仓库落后 ${info.behind} 个提交` : '',
-              info.npm && info.npm !== info.current ? ` · npm ${info.npm}` : '')
-          : h('span', null, `✅ 已是最新（${info.current ?? '?'}）`),
-        hasUpdate
-          ? h(Btn, { size: 'sm', variant: 'primary', disabled: busy, onClick: apply }, busy ? '更新中…' : '一键更新')
-          : null,
-        info.dirty && hasUpdate
-          ? h('span', { className: 'wh-muted' }, '插件仓库有未提交修改，更新会被拒绝')
-          : null,
-        msg ? h('span', { style: { color: 'var(--wh-accent)' } }, msg) : null)
+        h('span', { style: { fontWeight: 550 } },
+          `⬆ 有新版本（当前 ${info.current ?? '?'}）`,
+          info.behind ? ` · 落后 ${info.behind} 个提交` : '',
+          info.npm && info.npm !== info.current ? ` · npm ${info.npm}` : ''),
+        h('span', { className: 'wh-muted' },
+          info.dirty
+            ? '插件仓库有未提交修改，请先处理后再升级'
+            : '在 DSH 对话里说「升级 workhub 插件」完成升级与重载，或到插件仓库手动更新'),
+        info.errors?.length
+          ? h('span', { className: 'wh-muted', title: info.errors.join('；') }, '·')
+          : null)
     }
 
     // debug/testing hook: page components for smoke tests
