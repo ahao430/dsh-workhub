@@ -327,18 +327,27 @@ react-is/cjs/react-is.production.js:
         }, `${t.tone === 'bad' ? '⚠' : t.tone === 'warn' ? '◐' : '✓'} ${t.text}`)))
     }
 
-    const AntdProvider = ({ children }) => {
+    const AntdProvider = ({ children, mode = 'auto' }) => {
       const a = getAntd()
+      const [sysDark, setSysDark] = useState(null)
+      // DSH 按时间自动切主题：持续检测 bg-base 亮度，翻转时同步 antd 算法
+      useEffect(() => {
+        if (mode !== 'auto' || !a) return undefined
+        const check = () => {
+          try {
+            const el = document.querySelector('.wh-root')
+            const raw = getComputedStyle(el ?? document.documentElement).getPropertyValue('--dsw-alias-bg-base').trim()
+            const m = raw.match(/\d+(\.\d+)?/g)
+            if (m && m.length >= 3) setSysDark((0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 < 0.5)
+          } catch { /* 保持上次值 */ }
+        }
+        check()
+        const timer = setInterval(check, 3000)
+        return () => clearInterval(timer)
+      }, [mode, a])
       if (!a) return children
+      const dark = mode === 'dark' ? true : mode === 'light' ? false : (sysDark ?? false)
       try {
-        // 跟随 DSH 主题：bg-base 亮度 < 0.5 视为暗色，antd 切 darkAlgorithm
-        let dark = false
-        try {
-          const el = document.querySelector('.wh-root')
-          const raw = getComputedStyle(el ?? document.documentElement).getPropertyValue('--dsw-alias-bg-base').trim()
-          const m = raw.match(/\d+(\.\d+)?/g)
-          if (m && m.length >= 3) dark = (0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 < 0.5
-        } catch { /* 默认亮色 */ }
         return h(a.ConfigProvider, {
           locale: a.zhCN?.default ?? a.zhCN,
           theme: {
@@ -1198,7 +1207,9 @@ react-is/cjs/react-is.production.js:
     const SYNC_TONE = { ok: 'ok', syncing: 'warn', error: 'bad', partial: 'warn' }
     const SYNC_LABEL = { ok: '正常', syncing: '同步中', error: '错误', partial: '部分' }
 
-    function DataManager() {
+    function DataManager(props) {
+      const themeMode = props?.themeMode ?? 'auto'
+      const saveThemeMode = props?.saveThemeMode
       const [status, setStatus] = useState(null)
       const [busy, setBusy] = useState('')
       const [msg, setMsg] = useState(null)
@@ -1726,6 +1737,14 @@ react-is/cjs/react-is.production.js:
                     h('span', { className: 'wh-muted', style: { fontSize: 11, whiteSpace: 'nowrap' } },
                       o.at ? new Date(o.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : ''))))
             : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '暂无操作记录')),
+        h(Card, {
+          title: '界面主题',
+          sub: '跟随 DSH（按时间自动切换深浅色）· 也可手动指定',
+        },
+          h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+            [['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']].map(([m, label]) =>
+              h(Btn, { key: m, size: 'sm', variant: themeMode === m ? 'primary' : 'ghost', onClick: () => saveThemeMode?.(m) }, label))),
+          h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 6 } }, '覆盖仅影响本插件的表单与按钮配色，跟随系统时随 DSH 主题自动切换')),
         h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
@@ -3614,12 +3633,19 @@ react-is/cjs/react-is.production.js:
       const [scope, setScope] = useState(viewMem.groupId)
       const [pal, setPal] = useState(null) // null | { q, idx }
       const [refreshKey, setRefreshKey] = useState(0)
+      const [themeMode, setThemeMode] = useState('auto')
       useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
       // 应用列表拉一次（服务端 5 分钟缓存），喂给命令面板 + 预热快捷执行页
       useEffect(() => {
         if (!actionsMem.appsData) void api('/actions/appstack').then((r) => { actionsMem.appsData = r }).catch(() => {})
       }, [])
       // 打开插件即预热常用页面数据：切菜单不出现空白（api 缓存命中后即时渲染）
+      useEffect(() => { void api('/ui/theme').then((r) => setThemeMode(r.mode ?? 'auto')).catch(() => {}) }, [])
+      const saveThemeMode = async (mode) => {
+        setThemeMode(mode)
+        try { await api('/ui/theme', { method: 'POST', body: JSON.stringify({ mode }) }) } catch { /* 本地生效即可 */ }
+        toast(mode === 'auto' ? '主题跟随 DSH（按时间自动切换）' : mode === 'dark' ? '已切换深色界面' : '已切换浅色界面')
+      }
       useEffect(() => {
         const month = new Date().toISOString().slice(0, 7)
         const warm = [
@@ -3777,7 +3803,9 @@ react-is/cjs/react-is.production.js:
           ? { range }
           : current[0] === 'calendar'
             ? { refreshKey }
-            : null
+            : current[0] === 'data'
+              ? { themeMode, saveThemeMode }
+              : null
       const body = h(ErrorBoundary, { name: current[1], key: `${current[0]}:${refreshKey}` },
         h(current[2], pageProps))
 
@@ -3823,7 +3851,7 @@ react-is/cjs/react-is.production.js:
                         h('span', { className: 'wh-muted', style: { fontSize: 11 } }, item.sub ?? '')))
                   : h('div', { className: 'wh-muted', style: { padding: '14px', fontSize: 12 } }, '无匹配结果'))))
             : null
-      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts), palette))
+      return h(AntdProvider, { mode: themeMode }, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts), palette))
     }
 
     /* 更新提示横幅：只检测并提示，不做页面内自动更新（升级+重载由 DSH 助手或用户手动完成） */
