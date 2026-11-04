@@ -3554,12 +3554,14 @@ react-is/cjs/react-is.production.js:
             h('div', { className: 'wh-toolbar', style: { gap: 5 } },
               a.originator ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `发起人 ${a.originator}`) : null,
               a.createTime ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, fmtTs(a.createTime)) : null)),
-          h('div', { className: 'wh-toolbar', style: { gap: 5 } },
-            h(Btn, { size: 'sm', variant: 'primary', disabled: !!busy, onClick: () => actApproval(a, 'approve') }, busy === `a:${key}` ? '处理中…' : '同意'),
-            h(Btn, { size: 'sm', variant: 'danger', disabled: !!busy, onClick: () => actApproval(a, 'reject') }, '拒绝')))
+          appScope === 'pending' && a.taskId
+            ? h('div', { className: 'wh-toolbar', style: { gap: 5 } },
+                h(Btn, { size: 'sm', variant: 'primary', disabled: !!busy, onClick: () => actApproval(a, 'approve') }, busy === `a:${key}` ? '处理中…' : '同意'),
+                h(Btn, { size: 'sm', variant: 'danger', disabled: !!busy, onClick: () => actApproval(a, 'reject') }, '拒绝'))
+            : h('span', { className: 'wh-muted', style: { fontSize: 11 } }, a.status || ''))
       })
 
-      const TABS = [['todo', `待办${todos ? ` · ${(todos).length}` : ''}`], ['agenda', '日程 · 会议'], ['approval', `审批${approvals ? ` · ${(approvals).length}` : ''}`], ['notes', '便签']]
+      const TABS = [['todo', `待办${todos ? ` · ${(todos).length}` : ''}`], ['agenda', '日程 · 会议'], ['approval', `审批${approvals ? ` · ${(approvals).length}` : ''}`]]
       return h('div', { className: 'wh-content' },
         msg ? h('div', { className: 'wh-card', style: { fontSize: 12, wordBreak: 'break-all' } }, msg) : null,
         h('div', { className: 'wh-toolbar', style: { gap: 8, alignItems: 'center' } },
@@ -3596,8 +3598,7 @@ react-is/cjs/react-is.production.js:
                     approvals === null ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '加载中…') : null),
                   approvals === null ? null
                     : approvalRows.length ? approvalRows : h(Empty, { icon: '◇', title: '没有审批单', hint: '待处理的审批会显示同意 / 拒绝操作' }))
-              : h(Card, { title: '便签', sub: '钉钉便签暂无 OpenAPI / dws 通道' },
-                  h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '当前钉钉开放平台未提供便签接口，此页暂不可用。待办/日程/审批已覆盖对应能力。')))
+                : null)
     }
 
     function WorkHubPanel() {
