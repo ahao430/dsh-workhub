@@ -2553,14 +2553,41 @@ react-is/cjs/react-is.production.js:
       const [projects, setProjects] = useState([])
       const [projectFilter, setProjectFilter] = useState('')
       const [view, setView] = useState('month')
+      const [extraDays, setExtraDays] = useState({})
       useEffect(() => { api('/projects').then((r) => setProjects(r.projects)).catch(() => {}) }, [])
       useEffect(() => {
         const q = new URLSearchParams({ month })
         if (projectFilter) q.set('projectId', projectFilter)
         api(`/calendar?${q}`).then(setData).catch(() => setData({ days: [] }))
       }, [month, projectFilter])
+      // 周视图跨月时补拉邻月数据（否则邻月日期会误显示「未打卡」）
+      useEffect(() => {
+        if (view !== 'week') { setExtraDays({}); return undefined }
+        const sel = new Date(Number(selected.slice(0, 4)), Number(selected.slice(5, 7)) - 1, Number(selected.slice(8, 10)))
+        const monday = new Date(sel.getFullYear(), sel.getMonth(), sel.getDate() - ((sel.getDay() + 6) % 7))
+        const need = new Set()
+        for (let i = 0; i < 7; i++) {
+          const dd = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)
+          const mk = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}`
+          if (mk !== month) need.add(mk)
+        }
+        if (!need.size) { setExtraDays({}); return undefined }
+        let alive = true
+        Promise.all([...need].map((mk) => {
+          const q = new URLSearchParams({ month: mk })
+          if (projectFilter) q.set('projectId', projectFilter)
+          return api(`/calendar?${q}`).then((r) => r.days ?? []).catch(() => [])
+        })).then((lists) => {
+          if (!alive) return
+          const m = {}
+          for (const l of lists) for (const d of l) m[d.date] = d
+          setExtraDays(m)
+        })
+        return () => { alive = false }
+      }, [view, month, selected, projectFilter])
       const byDate = {}
       for (const d of data?.days ?? []) byDate[d.date] = d
+      for (const k of Object.keys(extraDays)) if (!byDate[k]) byDate[k] = extraDays[k]
 
       const [y, m] = month.split('-').map(Number)
       const first = new Date(y, m - 1, 1)
