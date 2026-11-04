@@ -2731,9 +2731,56 @@ window.__ModuleLoader__.load({
 
       const main = h('div', { className: 'wh-main' },
         header,
-        h('div', { className: 'wh-scroll' }, body))
+        h('div', { className: 'wh-scroll' }, h(UpdateBanner), body))
 
       return h('div', { className: 'wh-root' }, styleTag(), sidebar, main)
+    }
+
+    /* 更新提示横幅：检测（git 落后数 / npm latest）→ 一键更新（git --ff-only pull） */
+    const updateMem = { at: 0, data: null }
+
+    function UpdateBanner() {
+      const [info, setInfo] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const [msg, setMsg] = useState(null)
+      useEffect(() => {
+        if (updateMem.data && Date.now() - updateMem.at < 10 * 60_000) { setInfo(updateMem.data); return }
+        void api('/update/check')
+          .then((r) => { updateMem.data = r; updateMem.at = Date.now(); setInfo(r) })
+          .catch(() => {})
+      }, [])
+      if (!info) return null
+      const hasUpdate = !info.upToDate
+      if (!hasUpdate && !msg) return null
+      const apply = async () => {
+        setBusy(true)
+        try {
+          const r = await api('/update/apply', { method: 'POST', body: '{}' })
+          updateMem.data = r
+          updateMem.at = Date.now()
+          setInfo(r)
+          setMsg(r.note ?? '更新完成')
+        } catch (e) {
+          setMsg(`更新失败: ${e.message}`)
+        } finally { setBusy(false) }
+      }
+      return h('div', {
+        className: 'wh-card',
+        style: { marginBottom: 10, padding: '8px 12px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, borderColor: hasUpdate ? 'var(--wh-accent)' : undefined },
+      },
+        hasUpdate
+          ? h('span', { style: { fontWeight: 550 } },
+              `⬆ 有更新（当前 ${info.current ?? '?'}）`,
+              info.behind ? ` · 仓库落后 ${info.behind} 个提交` : '',
+              info.npm && info.npm !== info.current ? ` · npm ${info.npm}` : '')
+          : h('span', null, `✅ 已是最新（${info.current ?? '?'}）`),
+        hasUpdate
+          ? h(Btn, { size: 'sm', variant: 'primary', disabled: busy, onClick: apply }, busy ? '更新中…' : '一键更新')
+          : null,
+        info.dirty && hasUpdate
+          ? h('span', { className: 'wh-muted' }, '插件仓库有未提交修改，更新会被拒绝')
+          : null,
+        msg ? h('span', { style: { color: 'var(--wh-accent)' } }, msg) : null)
     }
 
     // debug/testing hook: page components for smoke tests
