@@ -330,31 +330,36 @@ react-is/cjs/react-is.production.js:
     const AntdProvider = ({ children, mode = 'auto' }) => {
       const a = getAntd()
       const [sysDark, setSysDark] = useState(null)
-      // DSH 按时间自动切主题：持续检测文字主色亮度（文字可读性直接相关），翻转时同步 antd 算法
+      // DSH 按时间自动切主题：检测「实际渲染背景色」（从面板向上找第一个非透明背景），比读 token 可靠
       useEffect(() => {
         if (mode !== 'auto' || !a) return undefined
-        const luminance = (raw) => {
-          const m = String(raw).match(/\d+(\.\d+)?/g)
-          return m && m.length >= 3 ? (0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 : null
-        }
-        const check = () => {
+        const probe = () => {
           try {
-            const el = document.querySelector('.wh-root')
-            const cs = getComputedStyle(el ?? document.documentElement)
-            const dark = [cs.getPropertyValue('--dsw-alias-label-primary'), cs.getPropertyValue('--dsw-alias-bg-base')]
-              .map(luminance)
-              .filter((v) => v != null)
-              .some((v) => v < 0.5)
-            if (dark !== null) setSysDark(dark)
+            let el = document.querySelector('.wh-root')
+            let bg = ''
+            while (el && el !== document.documentElement) {
+              const c = getComputedStyle(el).backgroundColor
+              if (c && !/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(,\s*0\s*)?\)/.test(c)) { bg = c; break }
+              el = el.parentElement
+            }
+            if (!bg) bg = getComputedStyle(document.body).backgroundColor
+            const m = String(bg).match(/\d+(\.\d+)?/g)
+            if (m && m.length >= 3) {
+              const lum = (0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / (255 * (Number(m[3] ?? 1) || 1))
+              setSysDark(lum < 0.5)
+            }
           } catch { /* 保持上次值 */ }
         }
-        check()
-        const timer = setInterval(check, 2000)
-        // DSH 切主题通常翻转 html/body 的 class / data-theme，监听到立即复检
-        const mo = new MutationObserver(check)
+        probe()
+        const timer = setInterval(probe, 2000)
+        const mo = new MutationObserver(probe)
         mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] })
         return () => { clearInterval(timer); mo.disconnect() }
       }, [mode, a])
+      // dark 状态写到根节点属性：自定义 CSS（Chip 状态色等）据此切换亮色变体
+      useEffect(() => {
+        try { document.querySelector('.wh-root')?.setAttribute('data-wh-dark', sysDark === true ? '1' : '0') } catch {}
+      }, [sysDark])
       if (!a) return children
       const dark = mode === 'dark' ? true : mode === 'light' ? false : (sysDark ?? false)
       try {
@@ -364,10 +369,11 @@ react-is/cjs/react-is.production.js:
             algorithm: dark && a.theme?.darkAlgorithm ? a.theme.darkAlgorithm : a.theme?.defaultAlgorithm,
             token: {
               colorPrimary: '#2F6FEB', borderRadius: 8, fontSize: 12, controlHeight: 26,
-              // 暗色下显式保证文字/容器对比（防止算法或全局样式干扰导致黑字落在深底上）
               ...(dark ? {
                 colorText: 'rgba(255,255,255,.92)',
                 colorTextLightSolid: '#fff',
+                colorTextDisabled: 'rgba(255,255,255,.5)',
+                colorBgContainerDisabled: 'rgba(255,255,255,.08)',
                 colorBgContainer: '#1d1d20',
                 colorBgElevated: '#26262a',
                 colorBorder: '#434347',
@@ -424,6 +430,12 @@ react-is/cjs/react-is.production.js:
   --wh-ok:var(--dsw-alias-state-success-primary,#1F9D68);--wh-ok-soft:var(--dsw-alias-state-success-secondary,rgba(31,157,104,.14));
   --wh-warn:var(--dsw-alias-state-warn-primary,#B8770A);--wh-warn-soft:var(--dsw-alias-state-warn-secondary,rgba(184,119,10,.16));
   --wh-bad:var(--dsw-alias-state-error-primary,#D9483B);--wh-bad-soft:var(--dsw-alias-state-error-secondary,rgba(217,72,59,.14))}
+  /* 暗色：状态色切换亮色变体，保证 Chip/文字对比（data-wh-dark 由 AntdProvider 依据实际渲染背景写入） */
+  .wh-root[data-wh-dark="1"]{
+    --wh-accent:#5B9BFF;--wh-accent-soft:rgba(91,155,255,.2);
+    --wh-ok:#3DD68C;--wh-ok-soft:rgba(61,214,140,.16);
+    --wh-warn:#F0B24A;--wh-warn-soft:rgba(240,178,74,.16);
+    --wh-bad:#FF7A6B;--wh-bad-soft:rgba(255,122,107,.16)}
 .wh-root *{box-sizing:border-box}
 .wh-side{width:198px;flex:none;display:flex;flex-direction:column;padding:14px 10px 10px;gap:2px;
   background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);overflow-y:auto}
