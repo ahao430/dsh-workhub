@@ -250,8 +250,8 @@ window.__ModuleLoader__.load({
         hint ? h('div', { className: 'wh-stat-hint' }, hint) : null)
     }
 
-    function Chip({ tone = 'neutral', children, style }) {
-      return h('span', { className: `wh-chip ${tone}`, style }, children)
+    function Chip({ tone = 'neutral', children, style, onClick, title }) {
+      return h('span', { className: `wh-chip ${tone}`, style, onClick, title }, children)
     }
 
     function Btn({ variant, size, disabled, onClick, children, style, title }) {
@@ -2105,6 +2105,11 @@ window.__ModuleLoader__.load({
       const [appsData, setAppsData] = useState(null)
       const [selApp, setSelApp] = useState('')
       const [detail, setDetail] = useState(null)
+      const [prefs, setPrefs] = useState(null)
+      const [search, setSearch] = useState('')
+      const [envFilter, setEnvFilter] = useState('')
+      const [noteDraft, setNoteDraft] = useState('')
+      const [noteBusy, setNoteBusy] = useState(false)
       const load = useCallback(() => api('/actions/pipelines').then(setData).catch((e) => setMsg(String(e.message))), [])
       useEffect(() => { void load() }, [load])
 
@@ -2124,6 +2129,37 @@ window.__ModuleLoader__.load({
           .then(setDetail)
           .catch((e) => setDetail({ error: { message: String(e.message) } }))
       }, [selApp])
+
+      useEffect(() => {
+        void api('/actions/appstack/prefs')
+          .then(setPrefs)
+          .catch(() => setPrefs({ favorites: [], notes: {} }))
+      }, [])
+
+      // 切换应用 / 备注载入时重置环境筛选与备注草稿
+      useEffect(() => {
+        setEnvFilter('')
+        setNoteDraft(prefs?.notes?.[selApp] ?? '')
+      }, [selApp, prefs?.notes?.[selApp]])
+
+      const toggleFav = async () => {
+        if (!selApp) return
+        const cur = prefs?.favorites ?? []
+        const favorites = cur.includes(selApp) ? cur.filter((x) => x !== selApp) : [...cur, selApp]
+        try {
+          const r = await api('/actions/appstack/prefs', { method: 'POST', body: JSON.stringify({ favorites }) })
+          setPrefs((p0) => ({ favorites: r.favorites, notes: (p0 ?? {}).notes ?? r.notes }))
+        } catch (e) { setMsg(`收藏失败: ${e.message}`) }
+      }
+
+      const saveNote = async () => {
+        if (!selApp) return
+        setNoteBusy(true)
+        try {
+          const r = await api('/actions/appstack/prefs', { method: 'POST', body: JSON.stringify({ notes: { [selApp]: noteDraft.trim() } }) })
+          setPrefs((p0) => ({ favorites: (p0 ?? {}).favorites ?? r.favorites, notes: r.notes }))
+        } catch (e) { setMsg(`备注保存失败: ${e.message}`) } finally { setNoteBusy(false) }
+      }
 
       const run = async (pipelineId, name) => {
         if (!window.confirm(`确认运行流水线？\n\n${name}（id: ${pipelineId}）\n\n该操作将真实触发云效流水线执行。`)) return
@@ -2168,28 +2204,85 @@ window.__ModuleLoader__.load({
                     busy === p.source_id ? '运行中…' : '运行'))))
           : h(Empty, { icon: '⚙', title: '暂无流水线', hint: '先在数据管理同步 yunxiao.pipelines' }))
 
-      const appstackCard = h(Card, { title: '应用交付', sub: `${appsData?.apps?.length ?? 0} 个应用 · 环境与部署单实时查询 · 部署需二次确认` },
+      const allApps = appsData?.apps ?? []
+      const notes = prefs?.notes ?? {}
+      const favNames = (prefs?.favorites ?? []).filter((n) => allApps.some((a) => a.name === n))
+      const q = search.trim().toLowerCase()
+      const filteredApps = q
+        ? allApps.filter((a) =>
+            a.name.toLowerCase().includes(q)
+            || (a.description ?? '').toLowerCase().includes(q)
+            || (notes[a.name] ?? '').toLowerCase().includes(q))
+        : allApps
+      const shownEnvs = (detail?.envs ?? []).filter((e) => !envFilter || e.name === envFilter)
+
+      const appstackCard = h(Card, { title: '应用交付', sub: `${allApps.length} 个应用 · 环境与部署单实时查询 · 部署需二次确认` },
           appsData?.error
             ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${appsData.error.message}`)
-            : (appsData?.apps?.length ?? 0) === 0
+            : allApps.length === 0
               ? h(Empty, { icon: '⬆', title: '暂无应用交付应用', hint: '云效 Appstack 应用会显示在这里' })
               : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+                  favNames.length
+                    ? h('div', { className: 'wh-tags', style: { gap: 5 } },
+                        favNames.map((n) =>
+                          h(Chip, {
+                            key: n,
+                            tone: selApp === n ? 'brand' : 'neutral',
+                            style: { cursor: 'pointer' },
+                            onClick: () => setSelApp(n),
+                            title: notes[n] || `切换到 ${n}`,
+                          }, `★ ${n}`)))
+                    : null,
                   h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+                    h('input', {
+                      className: 'wh-input', style: { width: 230 },
+                      placeholder: `搜索 ${allApps.length} 个应用 / 备注…`, value: search,
+                      onChange: (e) => setSearch(e.target.value),
+                    }),
                     h('select', {
-                      className: 'wh-select', value: selApp,
-                      onChange: (e) => setSelApp(e.target.value),
+                      className: 'wh-select', value: envFilter,
+                      onChange: (e) => setEnvFilter(e.target.value),
                     },
-                      (appsData.apps ?? []).map((a) => h('option', { key: a.name, value: a.name }, a.name))),
+                      h('option', { value: '' }, '全部环境'),
+                      (detail?.envs ?? []).map((e) =>
+                        h('option', { key: e.name, value: e.name }, `${e.displayName || e.name} (${e.name})`)))),
+                  h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+                    h('div', { className: 'wh-toolbar', style: { gap: 6, flex: 1, minWidth: 0 } },
+                      filteredApps.length
+                        ? h('select', {
+                            className: 'wh-select', style: { flex: 1, minWidth: 160 }, value: selApp,
+                            onChange: (e) => setSelApp(e.target.value),
+                          },
+                            filteredApps.map((a) =>
+                              h('option', { key: a.name, value: a.name },
+                                notes[a.name] ? `${a.name} · ${notes[a.name].slice(0, 18)}` : a.name)))
+                        : h('span', { className: 'wh-muted', style: { fontSize: 12 } }, `无匹配「${search.trim()}」的应用`),
+                      selApp
+                        ? h(Btn, {
+                            size: 'sm', variant: 'ghost', onClick: toggleFav,
+                            title: favNames.includes(selApp) ? '从常用移除' : '加入常用',
+                          }, favNames.includes(selApp) ? '★ 已收藏' : '☆ 收藏')
+                        : null),
                     detail?.orchestration?.sha
                       ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `最新编排 ${String(detail.orchestration.sha).slice(0, 8)} · ${detail.orchestration.message || '无描述'}`)
                       : null),
+                  selApp
+                    ? h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                        h('input', {
+                          className: 'wh-input', style: { flex: 1 },
+                          placeholder: '备注（如：生产官网前端，发布前需通知运维）', value: noteDraft,
+                          onChange: (e) => setNoteDraft(e.target.value),
+                        }),
+                        h(Btn, { size: 'sm', disabled: noteBusy, onClick: saveNote },
+                          noteBusy ? '保存中…' : '保存备注'))
+                    : null,
                   detail?.error
                     ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${detail.error.message}`)
                     : !detail
                       ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '加载环境与部署单…')
                       : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-                          (detail.envs ?? []).length
-                            ? (detail.envs ?? []).map((e) =>
+                          shownEnvs.length
+                            ? shownEnvs.map((e) =>
                               h('div', {
                                 key: e.name,
                                 className: 'wh-toolbar',
@@ -2202,7 +2295,11 @@ window.__ModuleLoader__.load({
                                   h(Chip, { tone: envTone(e.state) }, ENV_STATE[e.state] ?? e.state ?? '未知'),
                                   h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => deploy(e.name) },
                                     busy === `deploy:${e.name}` ? '部署中…' : '部署'))))
-                            : h(Empty, { icon: '◇', title: '该应用暂无环境', hint: '在云效 Appstack 中为应用创建环境' }),
+                            : h(Empty, {
+                                icon: '◇',
+                                title: (detail.envs ?? []).length ? '该筛选下无环境' : '该应用暂无环境',
+                                hint: (detail.envs ?? []).length ? '切换「全部环境」查看' : '在云效 Appstack 中为应用创建环境',
+                              }),
                           (detail.orders ?? []).length
                             ? h('div', { style: { marginTop: 6 } },
                                 h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '最近部署单'),

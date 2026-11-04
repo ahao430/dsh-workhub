@@ -278,6 +278,10 @@ const MOCK = {
     ],
     orchestration: { sha: '546566850fc09b1154938f85d79f5bff323787f1', message: '初始化编排', commitTime: '2026-10-22T09:28:52.000Z' },
   },
+  '/api/workhub/actions/appstack/prefs': {
+    favorites: ['demo-web'],
+    notes: { 'demo-web': '生产官网前端，发布前需通知运维' },
+  },
   '/api/workhub/actions/appstack': {
     apps: [
       { name: 'demo-web', description: '示例官网前端', template: 'nodejs-common', createdAt: '2026-08-12 10:00:00' },
