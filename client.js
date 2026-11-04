@@ -3562,12 +3562,29 @@ react-is/cjs/react-is.production.js:
       const [groups, setGroups] = useState([])
       const [scope, setScope] = useState(viewMem.groupId)
       const [pal, setPal] = useState(null) // null | { q, idx }
+      const [refreshKey, setRefreshKey] = useState(0)
       useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
       // 应用列表拉一次（服务端 5 分钟缓存），喂给命令面板 + 预热快捷执行页
       useEffect(() => {
         if (!actionsMem.appsData) void api('/actions/appstack').then((r) => { actionsMem.appsData = r }).catch(() => {})
       }, [])
       const switchScope = (id) => { viewMem.groupId = id; setScope(id) }
+      /* 刷新全部：清服务端缓存 + 客户端内存 + 重挂载当前页面（各页重新拉数据） */
+      const refreshAll = async () => {
+        try {
+          await api('/cache/flush', { method: 'POST', body: '{}' })
+        } catch { /* 服务端不可用时仍重挂载 */ }
+        actionsMem.data = null
+        actionsMem.appsData = null
+        actionsMem.detail = {}
+        updateMem.data = null
+        updateMem.at = 0
+        dtMem.agenda = null
+        dtMem.todos = null
+        dtMem.approvals = null
+        setRefreshKey((k) => k + 1)
+        toast('已刷新全部数据')
+      }
 
       // ⌘K / Ctrl+K 命令面板
       useEffect(() => {
@@ -3653,11 +3670,17 @@ react-is/cjs/react-is.production.js:
             h('div', { className: 'wh-brand-name' }, 'WorkHub'),
             h('div', { className: 'wh-brand-tag' }, '钉钉 × 云效 工作台'))),
         nav,
-        groups.length
-          ? h('div', { style: { marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column', gap: 6 } },
-              h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '视角 · 进行中需求归属'),
-              scopeControl)
-          : null)
+        h('div', { style: { marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column', gap: 6 } },
+          h('button', {
+            className: 'wh-nav',
+            title: '刷新全部数据（清缓存并重新加载）',
+            onClick: refreshAll,
+          }, h('span', { style: { fontSize: 14, lineHeight: 1 } }, '↻'), h('span', null, '刷新数据')),
+          groups.length
+            ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '视角 · 进行中需求归属'),
+                scopeControl)
+            : null))
 
       const header = h('header', { className: 'wh-top' },
         h('div', null,
@@ -3679,7 +3702,7 @@ react-is/cjs/react-is.production.js:
         : current[0] === 'efficiency' || current[0] === 'reports' || current[0] === 'projects'
           ? { range }
           : null
-      const body = h(ErrorBoundary, { name: current[1], key: current[0] },
+      const body = h(ErrorBoundary, { name: current[1], key: `${current[0]}:${refreshKey}` },
         h(current[2], pageProps))
 
       const main = h('div', { className: 'wh-main' },
