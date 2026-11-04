@@ -281,9 +281,9 @@ const MOCK = {
       { name: 'daily', displayName: '日常环境', state: 'DEPLOYING', deployGroup: 'k8s-daily' },
     ],
     orders: [
-      { name: '20261103174120-部署-workhub', type: 'Deploy', state: 'SUCCESS', version: '20261103174120-31', createdAt: '2026-11-03T09:41:20.000Z' },
-      { name: '20261101153002-部署-flow', type: 'Deploy', state: 'SUCCESS', version: '20261101153002-30', createdAt: '2026-11-01T07:30:02.000Z' },
-      { name: '20261028141155-回滚', type: 'Rollback', state: 'FAILED', version: '20261028141155-28', createdAt: '2026-10-28T06:11:55.000Z' },
+      { name: '20261103174120-部署-workhub', type: 'Deploy', state: 'SUCCESS', version: '20261103174120-31', sn: '9d7b7635e65047129c3099b269117a1b', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'production', artifacts: { 'image.backend': 'registry.cn-beijing/bsplatform/audit-console:1.0.5' }, createdAt: '2026-11-03T09:41:20.000Z' },
+      { name: '20261101153002-部署-flow', type: 'Deploy', state: 'SUCCESS', version: '20261101153002-30', sn: '3800921169404a61ab4e6785d49d0f01', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'daily', artifacts: { 'image.backend': 'registry.cn-beijing/bsplatform/audit-console:1.0.3' }, createdAt: '2026-11-01T07:30:02.000Z' },
+      { name: '20261028141155-回滚', type: 'Rollback', state: 'FAILED', version: '20261028141155-28', sn: '186551c8557b4648a4bb4541a4f6180b', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'production', artifacts: {}, createdAt: '2026-10-28T06:11:55.000Z' },
     ],
     orchestration: { sha: '546566850fc09b1154938f85d79f5bff323787f1', message: '初始化编排', commitTime: '2026-10-22T09:28:52.000Z' },
   },

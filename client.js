@@ -2186,6 +2186,20 @@ window.__ModuleLoader__.load({
         } catch (e) { setMsg(`运行失败: ${e.message}`) } finally { setBusy('') }
       }
 
+      const rollback = async (o) => {
+        if (!selApp) return
+        const envLabel = (detail?.envs ?? []).find((e) => e.name === o.envName)?.displayName ?? o.envName ?? ''
+        const arts = Object.entries(o.artifacts ?? {}).map(([k, v]) => `  ${k} = ${v}`).join('\n')
+        if (!window.confirm(`确认回滚？\n\n应用：${selApp}\n环境：${envLabel}\n目标版本：${o.version || o.name}\n制品：\n${arts}\n\n将按该部署单的制品重新创建部署单（真实发布）。`)) return
+        setBusy(`rb:${o.sn}`); setMsg(null)
+        try {
+          const r = await api('/actions/appstack/rollback', { method: 'POST', body: JSON.stringify({ appName: selApp, envName: o.envName, sn: o.sn, userConfirmed: true }) })
+          setMsg(`已创建回滚部署单「${r.order?.name ?? ''}」→ 目标 ${r.toVersion || o.version || o.name}`)
+          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then(setDetail)
+          load()
+        } catch (e) { setMsg(`回滚失败: ${e.message}`) } finally { setBusy('') }
+      }
+
       const deploy = async (envName) => {
         if (!selApp) return
         const envLabel = (detail?.envs ?? []).find((e) => e.name === envName)?.displayName ?? envName
@@ -2324,11 +2338,20 @@ window.__ModuleLoader__.load({
                                     className: 'wh-toolbar',
                                     style: { justifyContent: 'space-between', fontSize: 12, padding: '4px 0' },
                                   },
-                                    h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                                    h('div', { className: 'wh-toolbar', style: { gap: 6, minWidth: 0 } },
                                       h(Chip, { tone: orderTone(o.state) }, o.state || '?'),
-                                      h('span', null, `${ORDER_TYPE[o.type] ?? o.type ?? '—'} · ${o.name}`)),
-                                    h('span', { className: 'wh-muted', style: { whiteSpace: 'nowrap' } },
-                                      o.createdAt ? new Date(o.createdAt).toLocaleString() : ''))))
+                                      h('span', null, `${ORDER_TYPE[o.type] ?? o.type ?? '—'} · ${o.name}`),
+                                      o.version ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, o.version) : null),
+                                    h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                                      o.type === 'Deploy' && o.state === 'SUCCESS' && Object.keys(o.artifacts ?? {}).length
+                                        ? h(Btn, {
+                                            size: 'sm', variant: 'ghost', disabled: !!busy,
+                                            onClick: () => rollback(o),
+                                            title: '按该部署单的制品重新创建部署单',
+                                          }, busy === `rb:${o.sn}` ? '回滚中…' : '回滚到此版')
+                                        : null,
+                                      h('span', { className: 'wh-muted', style: { whiteSpace: 'nowrap' } },
+                                        o.createdAt ? new Date(o.createdAt).toLocaleString() : '')))))
                             : null)))
 
       return h('div', { className: 'wh-content' },
