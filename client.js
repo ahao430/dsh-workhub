@@ -807,6 +807,16 @@ react-is/cjs/react-is.production.js:
     /* 驾驶舱视角：'' = 我的，否则部门 groupId（跨切页记忆） */
     const viewMem = { groupId: '' }
 
+    /* 当前视角对应的演员列表（我的 → 身份；部门 → 成员及别名），供报告等按视角生成 */
+    const scopeActorsSnapshot = () => {
+      const groups = apiCachePeek('/groups')?.groups ?? []
+      const g = groups.find((x) => x.id === viewMem.groupId)
+      if (viewMem.groupId && g) {
+        return { scope: 'group', label: g.name, actors: g.members.flatMap((m) => [m.name, ...m.aliases]) }
+      }
+      return { scope: 'me', label: '我的', actors: apiCachePeek('/identity')?.actors ?? [] }
+    }
+
     /* 部门成员投入：提交 / 进行中需求 / 对话，按成员（含别名）聚合 */
     function GroupView({ groupId, range }) {
       const [data, setData] = useState(null)
@@ -2561,12 +2571,14 @@ react-is/cjs/react-is.production.js:
         h('div', { className: 'wh-cal-strength', style: { background: barColor } }))
     }
 
-    function CalendarPage() {
+    function CalendarPage(props) {
+      const refreshKey = props?.refreshKey ?? 0
       const today = new Date()
       const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
       const [month, setMonth] = useState(todayIso.slice(0, 7))
       const [selected, setSelected] = useState(todayIso)
-      const [data, setData] = useState(() => apiCachePeek(`/calendar?month=${todayIso.slice(0, 7)}`))
+      const [data, setData] = useState(null)
+      const [calErr, setCalErr] = useState(null)
       const [projects, setProjects] = useState([])
       const [projectFilter, setProjectFilter] = useState('')
       const [view, setView] = useState('month')
@@ -2575,8 +2587,9 @@ react-is/cjs/react-is.production.js:
       useEffect(() => {
         const q = new URLSearchParams({ month })
         if (projectFilter) q.set('projectId', projectFilter)
-        api(`/calendar?${q}`).then(setData).catch(() => setData({ days: [] }))
-      }, [month, projectFilter])
+        setCalErr(null)
+        api(`/calendar?${q}`).then((r) => { setData(r); setCalErr(null) }).catch((e) => { setData(null); setCalErr(String(e.message)) })
+      }, [month, projectFilter, refreshKey])
       // 周视图跨月时补拉邻月数据（否则邻月日期会误显示「未打卡」）
       useEffect(() => {
         if (view !== 'week') { setExtraDays({}); return undefined }
@@ -2655,7 +2668,14 @@ react-is/cjs/react-is.production.js:
             }))),
         h('div', { className: 'wh-muted', style: { marginTop: -6 } },
           '✦ = 已有 AI 总结 · 卡片展示打卡时段 / 报工时长 / 当日主力需求'),
-        view === 'month'
+        calErr
+          ? h(Card, { title: '日历数据加载失败', sub: month },
+              h('div', { className: 'wh-toolbar', style: { gap: 8 } },
+                h('span', { style: { fontSize: 12, color: 'var(--wh-bad)' } }, calErr),
+                h(Btn, { size: 'sm', onClick: () => { setData(null); setCalErr(null); setMonth((m) => m) } }, '重试')))
+          : data === null
+            ? h('div', { className: 'wh-muted', style: { padding: '18px 0', fontSize: 12 } }, '日历数据加载中…')
+            : view === 'month'
           ? h('div', null,
               h('div', { className: 'wh-cal-head' },
                 ['一', '二', '三', '四', '五', '六', '日'].map((w) => h('div', { key: w, className: 'wh-cal-wd' }, w))),
@@ -2687,7 +2707,8 @@ react-is/cjs/react-is.production.js:
       const genDaily = async (date) => {
         setBusy(`day:${date}`); setMsg(null)
         try {
-          await api('/generate/daily-draft', { method: 'POST', body: JSON.stringify({ date }) })
+          const sc = scopeActorsSnapshot()
+          await api('/generate/daily-draft', { method: 'POST', body: JSON.stringify({ date, actors: sc.actors, scopeLabel: sc.label }) })
           setMsg(`已生成 ${date} 的规则版总结`)
           loadSummaries()
         } catch (e) { setMsg(`生成失败: ${e.message}`) } finally { setBusy('') }
@@ -2696,10 +2717,11 @@ react-is/cjs/react-is.production.js:
       const genReport = async () => {
         setBusy('report'); setMsg(null)
         try {
-          const body = { preset: range?.preset ?? 'company_period' }
+          const sc = scopeActorsSnapshot()
+          const body = { preset: range?.preset ?? 'company_period', actors: sc.actors, scopeLabel: sc.label }
           if (range?.preset === 'custom') { body.start = range.start; body.end = range.end }
           const r = await api('/generate/report-draft', { method: 'POST', body: JSON.stringify(body) })
-          setMsg(`已生成周报草稿（${r.analysis.scope.startDate} ~ ${r.analysis.scope.endDate}）`)
+          setMsg(`已按「${sc.label}」视角生成周报草稿（${r.analysis.scope.startDate} ~ ${r.analysis.scope.endDate}）`)
           loadReports()
         } catch (e) { setMsg(`生成失败: ${e.message}`) } finally { setBusy('') }
       }
@@ -3741,7 +3763,9 @@ react-is/cjs/react-is.production.js:
         ? { range, setRange, scope }
         : current[0] === 'efficiency' || current[0] === 'reports' || current[0] === 'projects'
           ? { range }
-          : null
+          : current[0] === 'calendar'
+            ? { refreshKey }
+            : null
       const body = h(ErrorBoundary, { name: current[1], key: `${current[0]}:${refreshKey}` },
         h(current[2], pageProps))
 
