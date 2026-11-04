@@ -330,20 +330,30 @@ react-is/cjs/react-is.production.js:
     const AntdProvider = ({ children, mode = 'auto' }) => {
       const a = getAntd()
       const [sysDark, setSysDark] = useState(null)
-      // DSH 按时间自动切主题：持续检测 bg-base 亮度，翻转时同步 antd 算法
+      // DSH 按时间自动切主题：持续检测文字主色亮度（文字可读性直接相关），翻转时同步 antd 算法
       useEffect(() => {
         if (mode !== 'auto' || !a) return undefined
+        const luminance = (raw) => {
+          const m = String(raw).match(/\d+(\.\d+)?/g)
+          return m && m.length >= 3 ? (0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 : null
+        }
         const check = () => {
           try {
             const el = document.querySelector('.wh-root')
-            const raw = getComputedStyle(el ?? document.documentElement).getPropertyValue('--dsw-alias-bg-base').trim()
-            const m = raw.match(/\d+(\.\d+)?/g)
-            if (m && m.length >= 3) setSysDark((0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 < 0.5)
+            const cs = getComputedStyle(el ?? document.documentElement)
+            const dark = [cs.getPropertyValue('--dsw-alias-label-primary'), cs.getPropertyValue('--dsw-alias-bg-base')]
+              .map(luminance)
+              .filter((v) => v != null)
+              .some((v) => v < 0.5)
+            if (dark !== null) setSysDark(dark)
           } catch { /* 保持上次值 */ }
         }
         check()
-        const timer = setInterval(check, 3000)
-        return () => clearInterval(timer)
+        const timer = setInterval(check, 2000)
+        // DSH 切主题通常翻转 html/body 的 class / data-theme，监听到立即复检
+        const mo = new MutationObserver(check)
+        mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] })
+        return () => { clearInterval(timer); mo.disconnect() }
       }, [mode, a])
       if (!a) return children
       const dark = mode === 'dark' ? true : mode === 'light' ? false : (sysDark ?? false)
@@ -352,7 +362,18 @@ react-is/cjs/react-is.production.js:
           locale: a.zhCN?.default ?? a.zhCN,
           theme: {
             algorithm: dark && a.theme?.darkAlgorithm ? a.theme.darkAlgorithm : a.theme?.defaultAlgorithm,
-            token: { colorPrimary: '#2F6FEB', borderRadius: 8, fontSize: 12, controlHeight: 26 },
+            token: {
+              colorPrimary: '#2F6FEB', borderRadius: 8, fontSize: 12, controlHeight: 26,
+              // 暗色下显式保证文字/容器对比（防止算法或全局样式干扰导致黑字落在深底上）
+              ...(dark ? {
+                colorText: 'rgba(255,255,255,.92)',
+                colorTextLightSolid: '#fff',
+                colorBgContainer: '#1d1d20',
+                colorBgElevated: '#26262a',
+                colorBorder: '#434347',
+                colorBgLayout: 'transparent',
+              } : {}),
+            },
           },
         }, children)
       } catch {
