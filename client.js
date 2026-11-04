@@ -1984,12 +1984,37 @@ window.__ModuleLoader__.load({
 
     /* ----------------------------- Actions ------------------------------ */
 
+    const ENV_STATE = { RUNNING: '运行中', DEPLOYING: '部署中', NEW: '未部署', ERROR: '异常' }
+    const ORDER_TYPE = { Deploy: '部署', Rollback: '回滚', Scale: '扩缩', Destroy: '销毁' }
+    const envTone = (s) => (s === 'RUNNING' ? 'ok' : s === 'DEPLOYING' ? 'brand' : s === 'ERROR' ? 'bad' : 'neutral')
+    const orderTone = (s) => (s === 'SUCCESS' ? 'ok' : s === 'FAILED' ? 'bad' : s === 'RUNNING' || s === 'INIT' || s === 'PREPARING' ? 'brand' : 'neutral')
+
     function ActionsPage() {
       const [data, setData] = useState(null)
       const [msg, setMsg] = useState(null)
       const [busy, setBusy] = useState('')
+      const [appsData, setAppsData] = useState(null)
+      const [selApp, setSelApp] = useState('')
+      const [detail, setDetail] = useState(null)
       const load = useCallback(() => api('/actions/pipelines').then(setData).catch((e) => setMsg(String(e.message))), [])
       useEffect(() => { void load() }, [load])
+
+      useEffect(() => {
+        void api('/actions/appstack')
+          .then((r) => {
+            setAppsData(r)
+            if (r.apps?.length) setSelApp((cur) => cur || r.apps[0].name)
+          })
+          .catch((e) => setAppsData({ apps: [], error: { message: String(e.message) } }))
+      }, [])
+
+      useEffect(() => {
+        if (!selApp) return
+        setDetail(null)
+        void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`)
+          .then(setDetail)
+          .catch((e) => setDetail({ error: { message: String(e.message) } }))
+      }, [selApp])
 
       const run = async (pipelineId, name) => {
         if (!window.confirm(`确认运行流水线？\n\n${name}（id: ${pipelineId}）\n\n该操作将真实触发云效流水线执行。`)) return
@@ -1999,6 +2024,19 @@ window.__ModuleLoader__.load({
           setMsg(`已触发运行 #${r.runId}（${name}）`)
           load()
         } catch (e) { setMsg(`运行失败: ${e.message}`) } finally { setBusy('') }
+      }
+
+      const deploy = async (envName) => {
+        if (!selApp) return
+        const envLabel = (detail?.envs ?? []).find((e) => e.name === envName)?.displayName ?? envName
+        if (!window.confirm(`确认部署应用？\n\n应用：${selApp}\n环境：${envLabel}\n\n将使用最新编排版本创建部署单（真实发布）。`)) return
+        setBusy(`deploy:${envName}`); setMsg(null)
+        try {
+          const r = await api('/actions/appstack/deploy', { method: 'POST', body: JSON.stringify({ appName: selApp, envName, userConfirmed: true }) })
+          setMsg(`已创建部署单「${r.order?.name ?? ''}」· 状态 ${r.order?.state || 'INIT'}`)
+          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then(setDetail)
+          load()
+        } catch (e) { setMsg(`部署失败: ${e.message}`) } finally { setBusy('') }
       }
 
       const pipelines = data?.pipelines ?? []
@@ -2021,6 +2059,56 @@ window.__ModuleLoader__.load({
                     h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => run(p.source_id, p.title) },
                       busy === p.source_id ? '运行中…' : '运行'))))
             : h(Empty, { icon: '⚙', title: '暂无流水线', hint: '先在数据管理同步 yunxiao.pipelines' })),
+        h(Card, { title: '应用交付', sub: `${appsData?.apps?.length ?? 0} 个应用 · 环境与部署单实时查询 · 部署需二次确认` },
+          appsData?.error
+            ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${appsData.error.message}`)
+            : (appsData?.apps?.length ?? 0) === 0
+              ? h(Empty, { icon: '⬆', title: '暂无应用交付应用', hint: '云效 Appstack 应用会显示在这里' })
+              : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+                  h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+                    h('select', {
+                      className: 'wh-select', value: selApp,
+                      onChange: (e) => setSelApp(e.target.value),
+                    },
+                      (appsData.apps ?? []).map((a) => h('option', { key: a.name, value: a.name }, a.name))),
+                    detail?.orchestration?.sha
+                      ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `最新编排 ${String(detail.orchestration.sha).slice(0, 8)} · ${detail.orchestration.message || '无描述'}`)
+                      : null),
+                  detail?.error
+                    ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${detail.error.message}`)
+                    : !detail
+                      ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '加载环境与部署单…')
+                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                          (detail.envs ?? []).length
+                            ? (detail.envs ?? []).map((e) =>
+                              h('div', {
+                                key: e.name,
+                                className: 'wh-toolbar',
+                                style: { justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+                              },
+                                h('div', null,
+                                  h('div', { style: { fontWeight: 500 } }, e.displayName || e.name),
+                                  h('div', { className: 'wh-muted' }, `${e.name}${e.deployGroup ? ` · 部署组 ${e.deployGroup}` : ''}`)),
+                                h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                                  h(Chip, { tone: envTone(e.state) }, ENV_STATE[e.state] ?? e.state ?? '未知'),
+                                  h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => deploy(e.name) },
+                                    busy === `deploy:${e.name}` ? '部署中…' : '部署'))))
+                            : h(Empty, { icon: '◇', title: '该应用暂无环境', hint: '在云效 Appstack 中为应用创建环境' }),
+                          (detail.orders ?? []).length
+                            ? h('div', { style: { marginTop: 6 } },
+                                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '最近部署单'),
+                                (detail.orders ?? []).map((o, i) =>
+                                  h('div', {
+                                    key: `${o.name}-${i}`,
+                                    className: 'wh-toolbar',
+                                    style: { justifyContent: 'space-between', fontSize: 12, padding: '4px 0' },
+                                  },
+                                    h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                                      h(Chip, { tone: orderTone(o.state) }, o.state || '?'),
+                                      h('span', null, `${ORDER_TYPE[o.type] ?? o.type ?? '—'} · ${o.name}`)),
+                                    h('span', { className: 'wh-muted', style: { whiteSpace: 'nowrap' } },
+                                      o.createdAt ? new Date(o.createdAt).toLocaleString() : ''))))
+                            : null))),
         h(Card, { title: '操作审计日志', sub: '所有写操作留痕' },
           actions.length
             ? h('table', { className: 'wh-table' },
@@ -2035,7 +2123,7 @@ window.__ModuleLoader__.load({
                     h('td', null, h(Chip, { tone: a.status === 'ok' ? 'ok' : 'bad' }, a.status))))))
             : h(Empty, { icon: '◫', title: '暂无操作记录' })),
         h('div', { className: 'wh-muted', style: { textAlign: 'center' } },
-          '安全策略：查询直接执行 · 流水线运行需确认 · 应用交付未开放（需追加 PAT 权限）· 全部写操作审计留痕'))
+          '安全策略：查询直接执行 · 流水线运行与应用部署需确认 · 全部写操作审计留痕'))
     }
 
     /* ------------------------------ shell ------------------------------ */

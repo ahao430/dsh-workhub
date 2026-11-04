@@ -237,6 +237,26 @@ const MOCK = {
     actions: [
       { id: 'a1', operator: 'ui', action: 'pipeline.run', target: '5260828', status: 'ok', created_at: '2026-11-03T15:20:00Z' },
       { id: 'a2', operator: 'agent', action: 'pipeline.run', target: '5257383', status: 'ok', created_at: '2026-11-02T10:05:00Z' },
+      { id: 'a3', operator: 'ui', action: 'appstack.deploy', target: 'demo-web/production', status: 'ok', created_at: '2026-11-03T09:41:00Z' },
+    ],
+  },
+  '/api/workhub/actions/appstack/detail?': {
+    app: 'demo-web',
+    envs: [
+      { name: 'production', displayName: '生产环境', state: 'RUNNING', deployGroup: 'k8s-prod' },
+      { name: 'daily', displayName: '日常环境', state: 'DEPLOYING', deployGroup: 'k8s-daily' },
+    ],
+    orders: [
+      { name: '20261103174120-部署-workhub', type: 'Deploy', state: 'SUCCESS', version: '20261103174120-31', createdAt: '2026-11-03T09:41:20.000Z' },
+      { name: '20261101153002-部署-flow', type: 'Deploy', state: 'SUCCESS', version: '20261101153002-30', createdAt: '2026-11-01T07:30:02.000Z' },
+      { name: '20261028141155-回滚', type: 'Rollback', state: 'FAILED', version: '20261028141155-28', createdAt: '2026-10-28T06:11:55.000Z' },
+    ],
+    orchestration: { sha: '546566850fc09b1154938f85d79f5bff323787f1', message: '初始化编排', commitTime: '2026-10-22T09:28:52.000Z' },
+  },
+  '/api/workhub/actions/appstack': {
+    apps: [
+      { name: 'demo-web', description: '示例官网前端', template: 'nodejs-common', createdAt: '2026-08-12 10:00:00' },
+      { name: 'demo-api', description: '示例服务端', template: 'java-common', createdAt: '2026-08-20 14:30:00' },
     ],
   },
   '/api/workhub/analyses/input/chat?': {
