@@ -314,9 +314,20 @@ react-is/cjs/react-is.production.js:
       const a = getAntd()
       if (!a) return children
       try {
+        // 跟随 DSH 主题：bg-base 亮度 < 0.5 视为暗色，antd 切 darkAlgorithm
+        let dark = false
+        try {
+          const el = document.querySelector('.wh-root')
+          const raw = getComputedStyle(el ?? document.documentElement).getPropertyValue('--dsw-alias-bg-base').trim()
+          const m = raw.match(/\d+(\.\d+)?/g)
+          if (m && m.length >= 3) dark = (0.299 * Number(m[0]) + 0.587 * Number(m[1]) + 0.114 * Number(m[2])) / 255 < 0.5
+        } catch { /* 默认亮色 */ }
         return h(a.ConfigProvider, {
           locale: a.zhCN?.default ?? a.zhCN,
-          theme: { token: { colorPrimary: '#2F6FEB', borderRadius: 8, fontSize: 12, controlHeight: 26 } },
+          theme: {
+            algorithm: dark && a.theme?.darkAlgorithm ? a.theme.darkAlgorithm : a.theme?.defaultAlgorithm,
+            token: { colorPrimary: '#2F6FEB', borderRadius: 8, fontSize: 12, controlHeight: 26 },
+          },
         }, children)
       } catch {
         return children
@@ -362,10 +373,10 @@ react-is/cjs/react-is.production.js:
 
     const CSS = `
 .wh-root{display:flex;height:100%;font-size:13px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);
-  --wh-accent:#2F6FEB;--wh-accent-soft:rgba(47,111,235,.13);
-  --wh-ok:#1F9D68;--wh-ok-soft:rgba(31,157,104,.14);
-  --wh-warn:#B8770A;--wh-warn-soft:rgba(184,119,10,.16);
-  --wh-bad:#D9483B;--wh-bad-soft:rgba(217,72,59,.14)}
+  --wh-accent:var(--dsw-alias-state-business-primary,#2F6FEB);--wh-accent-soft:color-mix(in srgb,var(--wh-accent) 13%,transparent);
+  --wh-ok:var(--dsw-alias-state-success-primary,#1F9D68);--wh-ok-soft:var(--dsw-alias-state-success-secondary,rgba(31,157,104,.14));
+  --wh-warn:var(--dsw-alias-state-warn-primary,#B8770A);--wh-warn-soft:var(--dsw-alias-state-warn-secondary,rgba(184,119,10,.16));
+  --wh-bad:var(--dsw-alias-state-error-primary,#D9483B);--wh-bad-soft:var(--dsw-alias-state-error-secondary,rgba(217,72,59,.14))}
 .wh-root *{box-sizing:border-box}
 .wh-side{width:198px;flex:none;display:flex;flex-direction:column;padding:14px 10px 10px;gap:2px;
   background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);overflow-y:auto}
@@ -1185,6 +1196,8 @@ react-is/cjs/react-is.production.js:
       const [markMember, setMarkMember] = useState('')
       const [hist, setHist] = useState(null)
       const [notify, setNotify] = useState({ enabled: false, chatId: '' })
+      const [weekly, setWeekly] = useState(null)
+      const [wBusy, setWBusy] = useState(false)
 
       const refreshGroups = useCallback(() => api('/groups').then((r) => {
         setGroups(r.groups ?? [])
@@ -1201,7 +1214,18 @@ react-is/cjs/react-is.production.js:
       useEffect(() => {
         void api('/actions/history').then((r) => setHist(r.ops ?? [])).catch(() => {})
         void api('/actions/appstack/notify-prefs').then(setNotify).catch(() => {})
+        void api('/reports/weekly').then(setWeekly).catch(() => {})
       }, [])
+      const saveWeekly = async (next) => {
+        setWBusy(true)
+        try {
+          const r = await api('/reports/weekly', { method: 'POST', body: JSON.stringify(next) })
+          if (next.generate) {
+            toast(`已生成本周草稿：${r.analysis?.payload?.title ?? ''}`)
+            setWeekly((p0) => ({ ...(p0 ?? {}), last: new Date().toISOString().slice(0, 10) }))
+          } else setWeekly((p0) => ({ ...(p0 ?? {}), enabled: r.enabled }))
+        } catch (e) { setMsg(`周报草稿失败: ${e.message}`) } finally { setWBusy(false) }
+      }
       const saveNotify = async (next) => {
         try {
           const r = await api('/actions/appstack/notify-prefs', { method: 'POST', body: JSON.stringify(next) })
@@ -1627,6 +1651,19 @@ react-is/cjs/react-is.production.js:
                     },
                   }, '＋ 手动新建'))
               : null),
+        h(Card, {
+          title: '自动周报草稿',
+          sub: '每周五 17 点自动生成「按人分区」周报草稿（近 7 天），在报告页修改后提交',
+        },
+          h('div', { className: 'wh-toolbar', style: { gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
+            h(Btn, {
+              size: 'sm', variant: weekly?.enabled ? 'primary' : 'ghost',
+              disabled: wBusy, onClick: () => saveWeekly({ enabled: !(weekly?.enabled) }),
+            }, weekly?.enabled ? '已开启（点关闭）' : '已关闭（点开启）'),
+            h(Btn, { size: 'sm', disabled: wBusy, onClick: () => saveWeekly({ generate: true }) }, wBusy ? '生成中…' : '立即生成本周草稿'),
+            h('span', { className: 'wh-muted', style: { fontSize: 11 } }, weekly?.last ? `上次生成：${weekly.last}` : '尚未生成')),
+          h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 6 } },
+            '草稿按成员分区：提交 / 进行中需求 / 消息活跃 + 最近提交明细。数据不足时不会生成。')),
         h(Card, {
           title: '发布完成通知',
           sub: '研发阶段/部署结束后自动推送到选定的钉钉群（本机 dws 发送）',

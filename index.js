@@ -27,6 +27,16 @@ export function apply(ctx) {
     return () => clearInterval(timer)
   })
 
+  // 自动周报草稿：每小时检查一次，周五 17 点后生成本周按人分区草稿（report.weeklyAuto 开关）
+  ctx.effect(() => {
+    const tick = async () => {
+      try { router.db.saveWeeklyDraftIfDue?.() } catch {}
+    }
+    void tick()
+    const weeklyTimer = setInterval(tick, 60 * 60 * 1000)
+    return () => clearInterval(weeklyTimer)
+  })
+
   registerWorkHubTools(ctx, router)
 
   return () => {
