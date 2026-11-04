@@ -508,7 +508,7 @@ async function main() {
   }
 
   // project detail
-  const detail = await render(D.ProjectDetail, { projectId: 'p1' })
+  const detail = await render(D.ProjectDetail, { projectId: 'p1', onClose: () => {} })
   write('project-detail', shell({
     title: '项目分析', sub: '示例项目 A · 近 30 天分析', navLabel: '项目分析', PAGES: D.PAGES, h: ReactStub.createElement,
     body: ReactStub.createElement('div', { className: 'wh-content' }, detail),

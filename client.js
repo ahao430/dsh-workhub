@@ -965,7 +965,7 @@ window.__ModuleLoader__.load({
         err ? h('div', { style: { color: 'var(--wh-bad)', fontSize: 12 } }, err) : null)
     }
 
-    function ProjectDetail({ projectId, range }) {
+    function ProjectDetail({ projectId, range, onClose }) {
       const [data, setData] = useState(null)
       const [err, setErr] = useState(null)
       const effRange = range?.preset || (range?.start && range?.end) ? range : { preset: 'last_30_days' }
@@ -985,8 +985,10 @@ window.__ModuleLoader__.load({
         h(Card, {
           title: p.name,
           sub: `${data.range.startDate} ~ ${data.range.endDate} · 关联 ${data.total} 条工作记录`,
-          action: h(Chip, { tone: p.origin === 'yunxiao' ? 'brand' : 'neutral' },
-            p.origin === 'yunxiao' ? '云效项目' : '手动项目'),
+          action: h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+            onClose ? h(Btn, { size: 'sm', variant: 'ghost', onClick: onClose }, '← 返回全部项目') : null,
+            h(Chip, { tone: p.origin === 'yunxiao' ? 'brand' : 'neutral' },
+              p.origin === 'yunxiao' ? '云效项目' : '手动项目')),
         },
           h('div', { className: 'wh-stats' },
             h(Stat, { label: '报工工时', value: `${fs?.worklogHours ?? 0}h`, hint: `${fs?.worklogEntries ?? 0} 条报工` }),
@@ -1085,7 +1087,7 @@ window.__ModuleLoader__.load({
         msg ? h('div', { className: 'wh-card', style: { fontSize: 12 } }, msg) : null,
         h(Card, {
           title: '项目',
-          sub: '点击行查看项目分析 · 云效项目自动同步',
+          sub: '点击行查看项目分析，再点一次或用详情页「返回全部项目」收起 · 云效项目自动同步',
           action: h(Btn, { onClick: resolveNow }, '重新归集'),
         },
           rows.length
@@ -1095,7 +1097,7 @@ window.__ModuleLoader__.load({
                 h('tbody', null, rows))
             : h(Empty, { icon: '◎', title: '还没有项目', hint: '在下方创建第一个项目，或同步云效项目' })),
         selected && data?.projects?.some((p) => p.id === selected)
-          ? h(ProjectDetail, { projectId: selected, range })
+          ? h(ProjectDetail, { projectId: selected, range, onClose: () => setSelected(null) })
           : null,
         (inprog?.groups ?? []).length
           ? h(Card, {
