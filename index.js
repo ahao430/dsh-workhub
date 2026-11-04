@@ -31,7 +31,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     const tick = async () => {
       try {
-        const analysis = await router.db.saveWeeklyDraftIfDue?.()
+        const analysis = await router.weeklyDraft?.()
         if (analysis) {
           const title = analysis.payload?.title ?? '本周周报草稿'
           await router.notifySend?.(`WorkHub · ${title} 已生成，到报告页修改后提交`).catch(() => {})

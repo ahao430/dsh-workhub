@@ -882,6 +882,8 @@ react-is/cjs/react-is.production.js:
         : []
 
       return h('div', { className: 'wh-content' },
+        h(Card, { title: '今日待处理', sub: '钉钉日程 · 到期待办 · 待我审批', style: { marginBottom: 2 } },
+          h(DingTalkToday)),
         scope ? h(GroupView, { groupId: scope, range }) : null,
         h('div', { className: 'wh-stats' }, statCards),
         h('div', { className: 'wh-grid2' },
@@ -2221,6 +2223,9 @@ react-is/cjs/react-is.production.js:
 
       const meta = s?.metrics ?? {}
       const extraBlocks = [
+        h('div', { key: 'dt', style: { marginTop: 12 } },
+          h('div', { className: 'wh-section-title' }, '日程 · 待办（钉钉）'),
+          h(Card, null, h(DingTalkToday, { date }))),
         meta.myToday?.length
           ? h('div', { key: 'today', style: { marginTop: 12 } },
               h('div', { className: 'wh-section-title' }, '我今天做了什么'),
@@ -2507,6 +2512,7 @@ react-is/cjs/react-is.production.js:
               d.topReqs?.length ? `需求提交：${d.topReqs.map((r) => `${r.serial}×${r.count}`).join(' · ')}` : null,
               d.topReqs?.[0]?.title ? `最新：${d.topReqs[0].title}` : null,
               d.milestoneCount ? `排期节点 ${d.milestoneCount}` : null,
+              d.agenda ? `日程 ${d.agenda} 场` : null,
               d.hasSummary ? '已有 AI 总结' : null,
             ].filter(Boolean).join('\n')
           : date,
@@ -2515,7 +2521,8 @@ react-is/cjs/react-is.production.js:
           h('span', { className: 'wh-cal-day' }, String(Number(date.slice(8)))),
           isToday
             ? h('span', { className: 'wh-cal-today' }, '今日')
-            : d?.hasSummary ? h('span', { style: { color: 'var(--wh-accent)', fontSize: 10 } }, '✦') : null),
+            : d?.hasSummary ? h('span', { style: { color: 'var(--wh-accent)', fontSize: 10 } }, '✦') : null,
+          d?.agenda ? h('span', { title: `${d.agenda} 条日程`, style: { marginLeft: 'auto', fontSize: 10, color: 'var(--wh-accent)' } }, `🗓${d.agenda}`) : null),
         hasAtt
           ? h('div', { className: 'wh-cal-att' },
               h('span', { className: 'wh-cal-att-time' }, d.checkIn ?? '--:--'),
@@ -3006,6 +3013,73 @@ react-is/cjs/react-is.production.js:
     /* 快捷执行页内存缓存：切页不丢状态，回页秒显再后台刷新 */
     const actionsMem = { data: null, appsData: null, selApp: '', detail: {} }
 
+    /* 今日待处理（钉钉整合卡）：今日日程 + 到期待办 + 待我审批；与日历/驾驶舱复用 */
+    const dtMem = { agenda: null, todos: null, approvals: null, at: 0 }
+    const isoDay = (ts) => { const d = new Date(Number(ts)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+    function loadDingTalkToday(date) {
+      const target = date ?? isoDay(Date.now())
+      return Promise.all([
+        api(`/dt/agenda?start=${encodeURIComponent(`${target}T00:00:00+08:00`)}&end=${encodeURIComponent(`${target}T23:59:00+08:00`)}`).then((r) => r.events ?? []).catch(() => []),
+        api('/dt/todos?scope=my').then((r) => (r.todos ?? []).filter((t) => !t.done && t.dueTime && isoDay(t.dueTime) === target)).catch(() => []),
+        api('/dt/approvals?scope=pending').then((r) => r.approvals ?? []).catch(() => []),
+      ]).then(([events, todos, approvals]) => {
+        dtMem.agenda = events; dtMem.todos = todos; dtMem.approvals = approvals; dtMem.at = Date.now()
+        return { events, todos, approvals }
+      })
+    }
+    function DingTalkToday({ date }) {
+      const [data, setData] = useState(null)
+      const [busy, setBusy] = useState('')
+      const load = useCallback(() => {
+        setData(null)
+        loadDingTalkToday(date).then(setData).catch(() => setData({ events: [], todos: [], approvals: [] }))
+      }, [date])
+      useEffect(() => { load() }, [load])
+      const completeTodo = async (t) => {
+        if (!window.confirm(`完成待办？\n\n${t.subject}`)) return
+        setBusy(`c:${t.taskId}`)
+        try {
+          await api('/dt/todo/complete', { method: 'POST', body: JSON.stringify({ taskId: t.taskId }) })
+          toast(`待办「${t.subject.slice(0, 20)}」已完成`)
+          load()
+        } catch (e) { toast(`完成失败: ${e.message}`, 'bad') } finally { setBusy('') }
+      }
+      const actApproval = async (a, action) => {
+        const verb = action === 'approve' ? '同意' : '拒绝'
+        if (!window.confirm(`${verb}该审批？\n\n${a.title}\n发起人：${a.originator || '—'}`)) return
+        setBusy(`a:${a.taskId || a.instanceId}`)
+        try {
+          await api('/dt/approval/action', { method: 'POST', body: JSON.stringify({ instanceId: a.instanceId, taskId: a.taskId, action, userConfirmed: true }) })
+          toast(`已${verb}审批「${a.title.slice(0, 20)}」`)
+          load()
+        } catch (e) { toast(`${verb}失败: ${e.message}`, 'bad') } finally { setBusy('') }
+      }
+      if (!data) return h('div', { className: 'wh-muted', style: { fontSize: 12, padding: '6px 0' } }, '加载今日日程与待办…')
+      const count = data.events.length + data.todos.length + data.approvals.length
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+        h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } },
+          h(Chip, { tone: data.events.length ? 'brand' : 'neutral' }, `日程 ${data.events.length}`),
+          h(Chip, { tone: data.todos.length ? 'warn' : 'neutral' }, `到期待办 ${data.todos.length}`),
+          h(Chip, { tone: data.approvals.length ? 'warn' : 'neutral' }, `待我审批 ${data.approvals.length}`),
+          !count ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '今日无日程与到期待办') : null),
+        data.events.map((e) =>
+          h('div', { key: e.id || e.title, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '3px 0' } },
+            h('span', { style: { fontSize: 12.5 } }, `🗓 ${e.title}`),
+            h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+              e.start ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, new Date(e.start).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })) : null,
+              e.online ? h(Btn, { size: 'sm', onClick: () => window.open(e.online, '_blank') }, '加入') : null))),
+        data.todos.map((t) =>
+          h('div', { key: t.taskId, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '3px 0' } },
+            h('span', { style: { fontSize: 12.5 } }, `☑ ${t.subject}`),
+            h(Btn, { size: 'sm', disabled: !!busy, onClick: () => completeTodo(t) }, busy === `c:${t.taskId}` ? '完成中…' : '完成'))),
+        data.approvals.map((a) =>
+          h('div', { key: a.taskId || a.instanceId, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '3px 0' } },
+            h('span', { style: { fontSize: 12.5 } }, `✍ ${a.title}`),
+            h('div', { className: 'wh-toolbar', style: { gap: 5 } },
+              h(Btn, { size: 'sm', variant: 'primary', disabled: !!busy, onClick: () => actApproval(a, 'approve') }, busy === `a:${a.taskId}` ? '…' : '同意'),
+              h(Btn, { size: 'sm', variant: 'danger', disabled: !!busy, onClick: () => actApproval(a, 'reject') }, '拒绝')))))
+    }
+
     /* 研发流程阶段行：展开运行表单（分支 / 运行变量 / 备注）+ 最近运行状态与轮询 */
     function FlowStageRow({ app, wf, st, busy, onRun, lastPref }) {
       const [open, setOpen] = useState(false)
@@ -3427,7 +3501,6 @@ react-is/cjs/react-is.production.js:
       ['efficiency', '工作效能', EfficiencyPage, '工作活动分布与节奏', '洞察'],
       ['reports', '智能报告', ReportsPage, 'Agent 生成的报告草稿', '产出'],
       ['actions', '快捷执行', ActionsPage, '流水线运行与操作审计', '执行'],
-      ['dt', '钉钉事务', DingTalkPage, '待办 / 日程会议 / 审批', '执行'],
       ['data', '数据管理', DataManager, '数据源、同步与凭证', '系统'],
     ]
 
@@ -3453,152 +3526,6 @@ react-is/cjs/react-is.production.js:
       },
         h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: dotColor, flex: 'none' } }),
         label)
-    }
-
-    /* -------------------------- DingTalk 事务 ---------------------------- */
-    const fmtTs = (ts) => (ts ? new Date(Number(ts)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '')
-    function DingTalkPage() {
-      const [tab, setTab] = useState('todo')
-      const [todos, setTodos] = useState(null)
-      const [agenda, setAgenda] = useState(null)
-      const [approvals, setApprovals] = useState(null)
-      const [busy, setBusy] = useState('')
-      const [msg, setMsg] = useState(null)
-      const [creating, setCreating] = useState(false)
-      const [ntTitle, setNtTitle] = useState('')
-      const [ntDue, setNtDue] = useState('')
-      const [scope, setScope] = useState('my')
-      const [appScope, setAppScope] = useState('pending')
-
-      const loadTodos = useCallback((sc = scope) => {
-        setTodos(null)
-        void api(`/dt/todos?scope=${sc}`).then((r) => setTodos(r.todos ?? [])).catch((e) => { setTodos([]); setMsg(`待办加载失败: ${e.message}`) })
-      }, [scope])
-      const loadAgenda = useCallback(() => {
-        setAgenda(null)
-        const now = new Date()
-        const s0 = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T00:00:00+08:00`
-        const e0 = new Date(now.getTime() + 7 * 86_400_000)
-        const e1 = `${e0.getFullYear()}-${String(e0.getMonth() + 1).padStart(2, '0')}-${String(e0.getDate()).padStart(2, '0')}T23:59:00+08:00`
-        void api(`/dt/agenda?start=${encodeURIComponent(s0)}&end=${encodeURIComponent(e1)}`).then((r) => setAgenda(r.events ?? [])).catch((e) => { setAgenda([]); setMsg(`日程加载失败: ${e.message}`) })
-      }, [])
-      const loadApprovals = useCallback((sc = 'pending') => {
-        setAppScope(sc)
-        setApprovals(null)
-        void api(`/dt/approvals?scope=${sc}`).then((r) => setApprovals(r.approvals ?? [])).catch((e) => { setApprovals([]); setMsg(`审批加载失败: ${e.message}`) })
-      }, [])
-      useEffect(() => {
-        if (tab === 'todo') loadTodos()
-        else if (tab === 'agenda') loadAgenda()
-        else if (tab === 'approval') loadApprovals()
-      }, [tab, loadTodos, loadAgenda, loadApprovals])
-
-      const createTodo = async () => {
-        if (!ntTitle.trim()) { setMsg('标题必填'); return }
-        setBusy('create')
-        try {
-          await api('/dt/todo/create', { method: 'POST', body: JSON.stringify({ subject: ntTitle.trim(), due: ntDue.trim() || undefined }) })
-          toast(`待办「${ntTitle.trim()}」已创建`)
-          setNtTitle(''); setNtDue(''); setCreating(false)
-          loadTodos()
-        } catch (e) { setMsg(`创建失败: ${e.message}`) } finally { setBusy('') }
-      }
-      const completeTodo = async (t) => {
-        if (!window.confirm(`完成待办？\n\n${t.subject}`)) return
-        setBusy(`c:${t.taskId}`)
-        try {
-          await api('/dt/todo/complete', { method: 'POST', body: JSON.stringify({ taskId: t.taskId }) })
-          toast(`待办「${t.subject.slice(0, 20)}」已完成`)
-          loadTodos()
-        } catch (e) { setMsg(`完成失败: ${e.message}`) } finally { setBusy('') }
-      }
-      const actApproval = async (a, action) => {
-        const verb = action === 'approve' ? '同意' : '拒绝'
-        if (!window.confirm(`${verb}该审批？\n\n${a.title}\n发起人：${a.originator || '—'}`)) return
-        setBusy(`a:${a.taskId || a.instanceId}`)
-        try {
-          await api('/dt/approval/action', { method: 'POST', body: JSON.stringify({ instanceId: a.instanceId, taskId: a.taskId, action, userConfirmed: true }) })
-          toast(`已${verb}审批「${a.title.slice(0, 20)}」`)
-          loadApprovals()
-        } catch (e) { setMsg(`${verb}失败: ${e.message}`) } finally { setBusy('') }
-      }
-
-      const todoRows = (todos ?? []).map((t) =>
-        h('div', { key: t.taskId, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
-            h('span', { style: { fontSize: 12.5, fontWeight: 500 } }, t.subject),
-            h('div', { className: 'wh-toolbar', style: { gap: 5 } },
-              t.done ? h(Chip, { tone: 'ok' }, '已完成') : null,
-              t.dueTime ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `截止 ${fmtTs(t.dueTime)}`) : null,
-              t.priority === 30 || t.priority === 40 ? h(Chip, { tone: 'warn' }, '高优先') : null)),
-          !t.done
-            ? h(Btn, { size: 'sm', disabled: !!busy, onClick: () => completeTodo(t) }, busy === `c:${t.taskId}` ? '完成中…' : '完成')
-            : null))
-
-      const agendaRows = (agenda ?? []).map((e) =>
-        h('div', { key: e.id || e.title, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
-            h('span', { style: { fontSize: 12.5, fontWeight: 500 } }, e.title),
-            h('div', { className: 'wh-toolbar', style: { gap: 5 } },
-              e.start ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `${fmtTs(e.start)} → ${fmtTs(e.end)}`) : null,
-              e.attendees ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `${e.attendees} 人`) : null)),
-          e.online
-            ? h(Btn, { size: 'sm', onClick: () => window.open(e.online, '_blank') }, '加入')
-            : null))
-
-      const approvalRows = (approvals ?? []).map((a) => {
-        const key = a.taskId || a.instanceId
-        return h('div', { key, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
-            h('span', { style: { fontSize: 12.5, fontWeight: 500 } }, a.title),
-            h('div', { className: 'wh-toolbar', style: { gap: 5 } },
-              a.originator ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `发起人 ${a.originator}`) : null,
-              a.createTime ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, fmtTs(a.createTime)) : null)),
-          appScope === 'pending' && a.taskId
-            ? h('div', { className: 'wh-toolbar', style: { gap: 5 } },
-                h(Btn, { size: 'sm', variant: 'primary', disabled: !!busy, onClick: () => actApproval(a, 'approve') }, busy === `a:${key}` ? '处理中…' : '同意'),
-                h(Btn, { size: 'sm', variant: 'danger', disabled: !!busy, onClick: () => actApproval(a, 'reject') }, '拒绝'))
-            : h('span', { className: 'wh-muted', style: { fontSize: 11 } }, a.status || ''))
-      })
-
-      const TABS = [['todo', `待办${todos ? ` · ${(todos).length}` : ''}`], ['agenda', '日程 · 会议'], ['approval', `审批${approvals ? ` · ${(approvals).length}` : ''}`]]
-      return h('div', { className: 'wh-content' },
-        msg ? h('div', { className: 'wh-card', style: { fontSize: 12, wordBreak: 'break-all' } }, msg) : null,
-        h('div', { className: 'wh-toolbar', style: { gap: 8, alignItems: 'center' } },
-          h(Tabs, { tabs: TABS, active: tab, onChange: (id) => setTab(id) }),
-          tab === 'todo'
-            ? h(Btn, { size: 'sm', variant: 'primary', onClick: () => setCreating(!creating) }, creating ? '收起' : '＋ 新建待办')
-            : null),
-        tab === 'todo'
-          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-              creating
-                ? h('div', { className: 'wh-card', style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-                    h('div', { className: 'wh-toolbar', style: { gap: 6 } },
-                      h(WhInput, { style: { flex: 1 }, placeholder: '待办标题（必填）', value: ntTitle, onChange: (e) => setNtTitle(e.target.value), onEnter: createTodo }),
-                      h(WhInput, { style: { width: 190 }, placeholder: '截止时间（如 2026-11-06）', value: ntDue, onChange: (e) => setNtDue(e.target.value) }),
-                      h(Btn, { size: 'sm', variant: 'primary', disabled: !!busy, onClick: createTodo }, busy === 'create' ? '创建中…' : '创建')),
-                    h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '执行人默认为自己；截止时间精确到当天 18:00'))
-                : null,
-              h('div', { className: 'wh-toolbar', style: { gap: 6 } },
-                [['my', '我的待办'], ['created', '我创建的'], ['overdue', '已逾期'], ['today', '今天到期']].map(([sc, label]) =>
-                  h(Chip, { key: sc, tone: scope === sc ? 'brand' : 'neutral', style: { cursor: 'pointer' }, onClick: () => { setScope(sc); loadTodos(sc) } }, label)),
-                todos === null ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '加载中…') : null),
-              todos === null ? null
-                : todoRows.length ? todoRows : h(Empty, { icon: '◇', title: '没有待办', hint: '换一个范围，或新建一条' }))
-          : tab === 'agenda'
-            ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '未来 7 天日程（含会议，来自钉钉日历）'),
-                agenda === null ? h('span', { className: 'wh-muted', style: { fontSize: 12 } }, '加载中…')
-                  : agendaRows.length ? agendaRows : h(Empty, { icon: '◇', title: '未来 7 天没有日程', hint: '在钉钉日历中创建日程后这里会显示' }))
-            : tab === 'approval'
-              ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                  h('div', { className: 'wh-toolbar', style: { gap: 6 } },
-                    [['pending', '待我处理'], ['executed', '已处理'], ['initiated', '我发起的']].map(([sc, label]) =>
-                      h(Chip, { key: sc, tone: appScope === sc ? 'brand' : 'neutral', style: { cursor: 'pointer' }, onClick: () => loadApprovals(sc) }, label)),
-                    approvals === null ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '加载中…') : null),
-                  approvals === null ? null
-                    : approvalRows.length ? approvalRows : h(Empty, { icon: '◇', title: '没有审批单', hint: '待处理的审批会显示同意 / 拒绝操作' }))
-                : null)
     }
 
     function WorkHubPanel() {
