@@ -430,16 +430,62 @@ window.__ModuleLoader__.load({
 
     const GRAN_LABEL = { day: '按日', week: '按周', month: '按月', quarter: '按季度' }
 
+    /* 驾驶舱视角：'' = 我的，否则部门 groupId（跨切页记忆） */
+    const viewMem = { groupId: '' }
+
+    /* 部门成员投入：提交 / 进行中需求 / 对话，按成员（含别名）聚合 */
+    function GroupView({ groupId, range }) {
+      const [data, setData] = useState(null)
+      useEffect(() => {
+        void api(`/analytics/group?groupId=${encodeURIComponent(groupId)}&${rangeQuery(range)}`)
+          .then(setData)
+          .catch(() => setData({ error: { message: '加载失败' } }))
+      }, [groupId, range.preset, range.start, range.end])
+      if (!data || data.error) return null
+      return h(Card, {
+        title: `成员投入 · ${data.group.name}`,
+        sub: `${data.range.startDate} ~ ${data.range.endDate} · 提交 ${data.totals.commits} · 进行中 ${data.totals.inProgress} · 消息 ${data.totals.chats}${data.group.configured ? '' : ' · 未配置成员'}`,
+      },
+        h('div', { style: { display: 'flex', flexDirection: 'column' } },
+          data.members.map((m) =>
+            h('div', { key: m.name, style: { padding: '7px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
+              h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+                h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } },
+                  h('span', { style: { fontWeight: 500 } }, m.name),
+                  m.aliases.length ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, m.aliases.join(' / ')) : null),
+                h('div', { className: 'wh-toolbar', style: { gap: 5 } },
+                  h(Chip, { tone: m.commits.n ? 'brand' : 'neutral' }, `提交 ${m.commits.n}`),
+                  h(Chip, { tone: m.inProgress.n ? 'brand' : 'neutral' }, `进行中 ${m.inProgress.n}`),
+                  h(Chip, { tone: 'neutral' }, `消息 ${m.chats.n}`))),
+              m.inProgress.items.length
+                ? h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 2 } }, `进行中：${m.inProgress.items.map((it) => it.title).join(' · ')}`)
+                : null,
+              m.commits.recent.length
+                ? h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 2 } }, `最近提交：${m.commits.recent.join(' · ')}`)
+                : null))),
+        !data.members.length
+          ? h(Empty, { icon: '◎', title: '未配置成员', hint: '到「数据管理 → 我的部门」配置成员名单' })
+          : null)
+    }
+
     function Dashboard({ range, setRange }) {
       const [stats, setStats] = useState(null)
       const [err, setErr] = useState(null)
+      const [groups, setGroups] = useState([])
+      const [groupView, setGroupView] = useState(viewMem.groupId)
       const insights = useInsights({ kind: 'insight' })
       const load = useCallback(() => {
-        return api(`/analytics/dashboard?${rangeQuery(range)}`)
+        return api(`/analytics/dashboard?${rangeQuery(range)}${viewMem.groupId ? `&groupId=${encodeURIComponent(viewMem.groupId)}` : ''}`)
           .then((r) => { setStats(r); setRange({ ...range, resolved: r.range }) })
           .catch((e) => setErr(String(e.message)))
       }, [range.preset, range.start, range.end, range.granularity, range.compare])
       useEffect(() => { void load() }, [load])
+      useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
+      const switchScope = (id) => {
+        viewMem.groupId = id
+        setGroupView(id)
+        void load()
+      }
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!stats) return h(Loading)
 
@@ -487,6 +533,17 @@ window.__ModuleLoader__.load({
         : []
 
       return h('div', { className: 'wh-content' },
+        groups.length
+          ? h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
+              h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '视角'),
+              h(Chip, { tone: !groupView ? 'brand' : 'neutral', style: { cursor: 'pointer' }, onClick: () => switchScope('') }, '我的'),
+              groups.map((g) =>
+                h(Chip, {
+                  key: g.id, tone: groupView === g.id ? 'brand' : 'neutral', style: { cursor: 'pointer' },
+                  onClick: () => switchScope(g.id),
+                }, g.name)))
+          : null,
+        groupView ? h(GroupView, { groupId: groupView, range }) : null,
         h('div', { className: 'wh-stats' }, statCards),
         h('div', { className: 'wh-grid2' },
           h(Card, { title: '项目投入分布', sub: `${stats.range.startDate} ~ ${stats.range.endDate}` },
@@ -786,6 +843,56 @@ window.__ModuleLoader__.load({
       const [identity, setIdentity] = useState(null)
       const [idDraft, setIdDraft] = useState('')
       const [idBusy, setIdBusy] = useState(false)
+      const [groups, setGroups] = useState(null)
+      const [gName, setGName] = useState('')
+      const [gMembers, setGMembers] = useState('')
+      const [gEditId, setGEditId] = useState('')
+      const [gBusy, setGBusy] = useState(false)
+      const [deptName, setDeptName] = useState('')
+      const [gcand, setGcand] = useState([])
+
+      useEffect(() => {
+        void api('/groups')
+          .then((r) => {
+            setGroups(r.groups ?? [])
+            setGcand([...new Set([...(r.candidates?.commits ?? []), ...(r.candidates?.reqs ?? []), ...(r.candidates?.chats ?? [])])].slice(0, 16))
+          })
+          .catch(() => {})
+      }, [])
+
+      const saveGroup = async () => {
+        const name = gName.trim()
+        const members = gMembers.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
+        if (!name || !members.length) { setMsg('部门名与成员都必填'); return }
+        setGBusy(true)
+        try {
+          const cur = (groups ?? []).filter((g) => g.id !== gEditId)
+          const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: [...cur, { id: gEditId || undefined, name, members }] }) })
+          setGroups(r.groups ?? [])
+          setGName(''); setGMembers(''); setGEditId('')
+          setMsg(`已保存部门「${name}」（${members.length} 名成员）。git 署名不同的成员记得补别名（王昊:wanghao），否则提交统计会漏`)
+        } catch (e) { setMsg(`部门保存失败: ${e.message}`) } finally { setGBusy(false) }
+      }
+
+      const deleteGroup = async (id) => {
+        setGBusy(true)
+        try {
+          const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: (groups ?? []).filter((g) => g.id !== id) }) })
+          setGroups(r.groups ?? [])
+          setMsg('已删除部门')
+        } catch (e) { setMsg(`删除失败: ${e.message}`) } finally { setGBusy(false) }
+      }
+
+      const importDept = async () => {
+        if (!deptName.trim()) { setMsg('先填钉钉部门名再导入'); return }
+        setGBusy(true)
+        try {
+          const r = await api('/groups/import-dept', { method: 'POST', body: JSON.stringify({ deptName: deptName.trim() }) })
+          setGMembers((r.members ?? []).join(', '))
+          if (!gName.trim()) setGName(r.deptName ?? deptName)
+          setMsg(`已从钉钉导入「${r.deptName}」${(r.members ?? []).length} 名成员，确认后点保存。成员的提交署名别名需手动补（如 王昊:wanghao）`)
+        } catch (e) { setMsg(`钉钉导入失败: ${e.message}`) } finally { setGBusy(false) }
+      }
 
       useEffect(() => {
         void api('/identity')
@@ -929,6 +1036,56 @@ window.__ModuleLoader__.load({
                     },
                   }, c)))
             : null),
+        h(Card, {
+          title: '我的部门',
+          sub: '驾驶舱「视角」切换与成员投入统计 · 成员语法：名字 或 名字:提交署名别名（王昊:wanghao）',
+        },
+          (groups ?? []).length
+            ? (groups ?? []).map((g) =>
+                h('div', { key: g.id, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
+                  h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+                    h('span', { style: { fontWeight: 550, fontSize: 12.5 } }, g.name),
+                    g.members.map((m) =>
+                      h(Chip, { key: m.name, tone: 'neutral', title: m.aliases.join(' / ') || m.name },
+                        m.aliases.length ? `${m.name}·${m.aliases.length}别名` : m.name))),
+                  h('div', { className: 'wh-toolbar', style: { gap: 5 } },
+                    h(Btn, {
+                      size: 'sm', variant: 'ghost',
+                      onClick: () => {
+                        setGEditId(g.id); setGName(g.name)
+                        setGMembers(g.members.map((m) => (m.aliases.length ? `${m.name}:${m.aliases.join('|')}` : m.name)).join(', '))
+                      },
+                    }, '编辑'),
+                    h(Btn, { size: 'sm', variant: 'ghost', disabled: gBusy, onClick: () => deleteGroup(g.id) }, '删除'))))
+            : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '还没有部门。新建一个，或从钉钉通讯录导入'),
+          gEditId || gName || gMembers
+            ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 } },
+                h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
+                  h('input', { className: 'wh-input', style: { width: 150 }, placeholder: '部门名', value: gName, onChange: (e) => setGName(e.target.value) }),
+                  h('input', { className: 'wh-input', style: { width: 130 }, placeholder: '钉钉部门名', value: deptName, onChange: (e) => setDeptName(e.target.value) }),
+                  h(Btn, { size: 'sm', disabled: gBusy, onClick: importDept }, '从钉钉导入')),
+                h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
+                  h('input', {
+                    className: 'wh-input', style: { flex: 1, minWidth: 240 },
+                    placeholder: '成员（逗号分隔，支持别名：王昊:wanghao）', value: gMembers,
+                    onChange: (e) => setGMembers(e.target.value),
+                  }),
+                  h(Btn, { size: 'sm', variant: 'primary', disabled: gBusy, onClick: saveGroup }, gBusy ? '处理中…' : '保存部门'),
+                  h(Btn, { size: 'sm', onClick: () => { setGEditId(''); setGName(''); setGMembers('') } }, '取消')),
+                gcand.length
+                  ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+                      h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '常见名字（点击加入成员）：'),
+                      gcand.map((c) =>
+                        h(Chip, {
+                          key: c, tone: 'neutral', style: { cursor: 'pointer' },
+                          onClick: () => {
+                            const cur = gMembers.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
+                            if (!cur.includes(c)) setGMembers([...cur, c].join(', '))
+                          },
+                        }, c)))
+                  : null)
+            : h('div', { style: { marginTop: 8 } },
+                h(Btn, { size: 'sm', onClick: () => { setGEditId(''); setGName(''); setGMembers('') } }, '＋ 新建部门'))),
         h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,

@@ -293,6 +293,43 @@ const MOCK = {
     ],
     orchestration: { sha: '546566850fc09b1154938f85d79f5bff323787f1', message: '初始化编排', commitTime: '2026-10-22T09:28:52.000Z' },
   },
+  '/api/workhub/groups': {
+    groups: [
+      {
+        id: 'g_fe', name: '前端开发部',
+        members: [
+          { name: '王昊', aliases: ['wanghao'] },
+          { name: '杨涛', aliases: ['yangtao'] },
+          { name: '周铭扬', aliases: ['zhoumingyang'] },
+          { name: '鲁媛', aliases: ['luyuan'] },
+          { name: '王光明', aliases: [] },
+          { name: '曾发', aliases: ['zengfa'] },
+          { name: '李洋', aliases: ['liyang'] },
+          { name: '赵家彬', aliases: [] },
+        ],
+      },
+    ],
+    candidates: {
+      commits: ['王昊', 'zengfa', 'sunyinwang', 'xtl', 'cabin'],
+      reqs: ['王昊', '杨涛', '鲁媛', '李雅丽'],
+      chats: ['王昊', '王光明', '赵家彬'],
+    },
+  },
+  '/api/workhub/analytics/group?': {
+    range: { startDate: '2026-10-29', endDate: '2026-11-04' },
+    group: { id: 'g_fe', name: '前端开发部', configured: 8 },
+    totals: { commits: 112, inProgress: 3, chats: 581 },
+    members: [
+      { name: '王昊', aliases: ['wanghao'], commits: { n: 55, recent: ['feat: 驾驶舱视角切换', 'fix: 环境筛选位置'] }, inProgress: { n: 2, items: [{ title: 'ZTPRO-922 会员分层策略重构', status: '联调中', day: '2026-11-04' }] }, chats: { n: 488, samples: [] } },
+      { name: '曾发', aliases: ['zengfa'], commits: { n: 18, recent: ['refactor: 网关鉴权链路'] }, inProgress: { n: 1, items: [{ title: 'GYPRO-201 鉴权灰度', status: '测试中', day: '2026-11-03' }] }, chats: { n: 12, samples: [] } },
+      { name: '李洋', aliases: ['liyang'], commits: { n: 16, recent: ['chore: 依赖升级'] }, inProgress: { n: 0, items: [] }, chats: { n: 4, samples: [] } },
+      { name: '王光明', aliases: [], commits: { n: 0, recent: [] }, inProgress: { n: 0, items: [] }, chats: { n: 36, samples: [] } },
+      { name: '赵家彬', aliases: [], commits: { n: 2, recent: ['fix: 空指针'] }, inProgress: { n: 0, items: [] }, chats: { n: 29, samples: [] } },
+      { name: '杨涛', aliases: ['yangtao'], commits: { n: 2, recent: [] }, inProgress: { n: 0, items: [] }, chats: { n: 9, samples: [] } },
+      { name: '鲁媛', aliases: ['luyuan'], commits: { n: 7, recent: [] }, inProgress: { n: 0, items: [] }, chats: { n: 3, samples: [] } },
+      { name: '周铭扬', aliases: ['zhoumingyang'], commits: { n: 0, recent: [] }, inProgress: { n: 0, items: [] }, chats: { n: 0, samples: [] } },
+    ],
+  },
   '/api/workhub/identity': {
     actors: ['王闻浩', '王昊'],
     candidates: ['王昊', 'zengfa', 'sunyinwang', 'xtl', 'cabin', 'xiaoyaoyaoGitHub', 'liyang', 'yuandw'],
