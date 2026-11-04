@@ -2579,6 +2579,7 @@ react-is/cjs/react-is.production.js:
       const [selected, setSelected] = useState(todayIso)
       const [data, setData] = useState(null)
       const [calErr, setCalErr] = useState(null)
+      const [agendaByDay, setAgendaByDay] = useState({})
       const [projects, setProjects] = useState([])
       const [projectFilter, setProjectFilter] = useState('')
       const [view, setView] = useState('month')
@@ -2590,6 +2591,13 @@ react-is/cjs/react-is.production.js:
         setCalErr(null)
         api(`/calendar?${q}`).then((r) => { setData(r); setCalErr(null) }).catch((e) => { setData(null); setCalErr(String(e.message)) })
       }, [month, projectFilter, refreshKey])
+      // 钉钉日程标记单独加载（不阻塞日历主体），到达后合并
+      useEffect(() => {
+        let alive = true
+        setAgendaByDay({})
+        api(`/calendar/agenda?month=${month}`).then((r) => { if (alive) setAgendaByDay(r.byDay ?? {}) }).catch(() => {})
+        return () => { alive = false }
+      }, [month, refreshKey])
       // 周视图跨月时补拉邻月数据（否则邻月日期会误显示「未打卡」）
       useEffect(() => {
         if (view !== 'week') { setExtraDays({}); return undefined }
@@ -2618,6 +2626,10 @@ react-is/cjs/react-is.production.js:
       const byDate = {}
       for (const d of data?.days ?? []) byDate[d.date] = d
       for (const k of Object.keys(extraDays)) if (!byDate[k]) byDate[k] = extraDays[k]
+      for (const dt of Object.keys(agendaByDay)) {
+        if (byDate[dt]) byDate[dt] = { ...byDate[dt], agenda: agendaByDay[dt] }
+        else if (agendaByDay[dt]) byDate[dt] = { date: dt, agenda: agendaByDay[dt] }
+      }
 
       const [y, m] = month.split('-').map(Number)
       const first = new Date(y, m - 1, 1)
