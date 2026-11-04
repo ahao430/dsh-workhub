@@ -2497,7 +2497,7 @@ react-is/cjs/react-is.production.js:
         'color-mix(in srgb, var(--wh-accent) 48%, transparent)',
         'color-mix(in srgb, var(--wh-accent) 66%, transparent)',
         'var(--wh-accent)'][level]
-      const hasAtt = !!d?.attendance
+      const hasAtt = !!d?.attendance || !!d?.checkIn
       const hasWl = (d?.worklogHours ?? 0) > 0
       return h('div', {
         className: ['wh-cal-cell', isSel ? 'sel' : '', isToday ? 'today' : ''].filter(Boolean).join(' '),
