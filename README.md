@@ -165,17 +165,17 @@ node tests/screenshot.mjs               # 用合成数据生成 docs/screens/*.h
 
 ## 发布
 
-日常提交由 `.github/workflows/ci.yml` 自动跑语法检查、渲染冒烟测试和物料检查。发版走 tag：
+日常提交由 `.github/workflows/ci.yml` 自动跑语法检查、渲染冒烟测试和物料检查。发版以 git tag 为发布标记：
 
 ```bash
-# 1. 改 package.json 的 version（如 0.1.1），提交推送
-git commit -am "chore: 0.1.1" && git push
+# 1. 改 package.json 的 version（如 0.2.0），提交推送
+git commit -am "chore: 0.2.0" && git push
 
-# 2. 打 tag 并推送，Actions 会校验版本一致后发布到 npm
-git tag v0.1.1 && git push origin v0.1.1
+# 2. 打 tag 并推送（git tag 即发布记录，不走 npm 分发）
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
-`Publish` 工作流会 `npm publish --access public --provenance`，因此需要仓库 Secret `NPM_TOKEN`（npmjs.com → Access Tokens → **Automation** 类型，可跳过 OTP）。未配置 Secret 时仍可本地手动发布：`npm publish --access public`。
+如需发布到 npm，本地执行 `npm publish --access public`（或按 tag 版本号恢复 Publish 工作流并配置 `NPM_TOKEN`）。
 
 ## 路线图
 
