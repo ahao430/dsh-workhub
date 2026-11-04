@@ -1137,11 +1137,12 @@ react-is/cjs/react-is.production.js:
       const [idBusy, setIdBusy] = useState(false)
       const [groups, setGroups] = useState(null)
       const [gName, setGName] = useState('')
-      const [gMembers, setGMembers] = useState('')
+      const [editMembers, setEditMembers] = useState(null) // [{ name, aliases: 'a, b' }]
+      const [newMember, setNewMember] = useState('')
       const [gEditId, setGEditId] = useState('')
       const [gBusy, setGBusy] = useState(false)
-      const [deptName, setDeptName] = useState('')
       const [gcand, setGcand] = useState([])
+      const [browse, setBrowse] = useState(null) // { path: [{id,name}], depts, members, loading, busy }
       const [ob, setOb] = useState(null)
       const [obBusy, setObBusy] = useState(false)
       const [unmapped, setUnmapped] = useState([])
@@ -1214,15 +1215,17 @@ react-is/cjs/react-is.production.js:
 
       const saveGroup = async () => {
         const name = gName.trim()
-        const members = gMembers.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
+        const members = (editMembers ?? [])
+          .map((m) => ({ name: String(m.name ?? '').trim(), aliases: String(m.aliases ?? '').split(/[,，、|\s]+/).map((x) => x.trim()).filter(Boolean) }))
+          .filter((m) => m.name)
         if (!name || !members.length) { setMsg('部门名与成员都必填'); return }
         setGBusy(true)
         try {
           const cur = (groups ?? []).filter((g) => g.id !== gEditId)
           const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: [...cur, { id: gEditId || undefined, name, members }] }) })
           setGroups(r.groups ?? [])
-          setGName(''); setGMembers(''); setGEditId('')
-          setMsg(`已保存部门「${name}」（${members.length} 名成员）。git 署名不同的成员记得补别名（王昊:wanghao），否则提交统计会漏`)
+          setGName(''); setEditMembers(null); setNewMember(''); setGEditId('')
+          setMsg(`已保存部门「${name}」（${members.length} 名成员）`)
         } catch (e) { setMsg(`部门保存失败: ${e.message}`) } finally { setGBusy(false) }
       }
 
@@ -1235,15 +1238,47 @@ react-is/cjs/react-is.production.js:
         } catch (e) { setMsg(`删除失败: ${e.message}`) } finally { setGBusy(false) }
       }
 
-      const importDept = async () => {
-        if (!deptName.trim()) { setMsg('先填钉钉部门名再导入'); return }
-        setGBusy(true)
+      /* 编辑成员行：添加（支持 名字 或 名字:别名1|别名2）/ 删除 */
+      const addMemberRow = () => {
+        const raw = newMember.trim()
+        if (!raw) return
+        const [head, tail] = raw.split(/[:：]/)
+        const name = String(head ?? '').trim()
+        const aliases = String(tail ?? '').split(/[|｜,，、\s]+/).map((x) => x.trim()).filter(Boolean)
+        if (!name) return
+        setEditMembers((p0) => [...(p0 ?? []), { name, aliases: aliases.join(', ') }])
+        setNewMember('')
+      }
+
+      /* 钉钉组织架构浏览：逐级选部门 → 添加为分组（同名则同步成员） */
+      const fetchDept = async (parentId, path) => {
+        setBrowse({ path, depts: [], members: [], loading: true, busy: false })
         try {
-          const r = await api('/groups/import-dept', { method: 'POST', body: JSON.stringify({ deptName: deptName.trim() }) })
-          setGMembers((r.members ?? []).join(', '))
-          if (!gName.trim()) setGName(r.deptName ?? deptName)
-          setMsg(`已从钉钉导入「${r.deptName}」${(r.members ?? []).length} 名成员，确认后点保存。成员的提交署名别名需手动补（如 王昊:wanghao）`)
-        } catch (e) { setMsg(`钉钉导入失败: ${e.message}`) } finally { setGBusy(false) }
+          const r = await api(`/depts?parentId=${encodeURIComponent(parentId)}`)
+          setBrowse({ path, depts: r.depts ?? [], members: r.members ?? [], loading: false, busy: false })
+        } catch (e) {
+          setBrowse({ path, depts: [], members: [], loading: false, busy: false })
+          setMsg(`组织架构加载失败: ${e.message}`)
+        }
+      }
+      const navDept = (d) => fetchDept(d.id, [...(browse?.path ?? []), d])
+      const goUpTo = (i) => {
+        const path = (browse?.path ?? []).slice(0, i)
+        const parentId = path.length ? path[path.length - 1].id : '1'
+        fetchDept(parentId, path)
+      }
+      const pickDept = async () => {
+        const path = browse?.path ?? []
+        if (!path.length || !(browse?.members ?? []).length) { setMsg('先进入一个具体部门（需有成员）'); return }
+        const name = path[path.length - 1].name.split('-').pop()
+        setBrowse((b0) => ({ ...(b0 ?? {}), busy: true }))
+        try {
+          const cur = (groups ?? []).filter((g) => g.name !== name)
+          const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: [...cur, { name, members: browse.members }] }) })
+          setGroups(r.groups ?? [])
+          setMsg(`已${(groups ?? []).some((g) => g.name === name) ? '同步' : '添加'}部门「${name}」（${browse.members.length} 人）。成员别名可在下方编辑`)
+          setBrowse(null)
+        } catch (e) { setMsg(`添加失败: ${e.message}`); setBrowse((b0) => ({ ...(b0 ?? {}), busy: false })) }
       }
 
       useEffect(() => {
@@ -1410,7 +1445,7 @@ react-is/cjs/react-is.production.js:
             : null),
         h(Card, {
           title: '我的部门',
-          sub: '驾驶舱「视角」切换与成员投入统计 · 成员语法：名字 或 名字:提交署名别名（王昊:wanghao）',
+          sub: '从钉钉组织架构选择部门 · 成员别名（提交署名）可编辑',
         },
           (groups ?? []).length
             ? (groups ?? []).map((g) =>
@@ -1425,11 +1460,12 @@ react-is/cjs/react-is.production.js:
                       size: 'sm', variant: 'ghost',
                       onClick: () => {
                         setGEditId(g.id); setGName(g.name)
-                        setGMembers(g.members.map((m) => (m.aliases.length ? `${m.name}:${m.aliases.join('|')}` : m.name)).join(', '))
+                        setEditMembers(g.members.map((m) => ({ name: m.name, aliases: m.aliases.join(', ') })))
+                        setNewMember('')
                       },
                     }, '编辑'),
                     h(Btn, { size: 'sm', variant: 'ghost', disabled: gBusy, onClick: () => deleteGroup(g.id) }, '删除'))))
-            : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '还没有部门。新建一个，或从钉钉通讯录导入'),
+            : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '还没有部门。从钉钉组织架构选择，或手动新建'),
           (groups ?? []).length && (unmapped.length || markFor)
             ? h('div', { style: { marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 } },
                 h('div', { className: 'wh-muted', style: { fontSize: 11 } },
@@ -1467,33 +1503,80 @@ react-is/cjs/react-is.production.js:
                       h(Btn, { size: 'sm', variant: 'ghost', onClick: () => setMarkFor('') }, '取消'))
                   : null)
             : null,
-          gEditId || gName || gMembers
+          browse
+            ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8, padding: 10, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8 } },
+                h('div', { className: 'wh-toolbar', style: { gap: 4, flexWrap: 'wrap', alignItems: 'center' } },
+                  h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '组织架构'),
+                  h(Chip, { tone: browse.path.length ? 'neutral' : 'brand', style: { cursor: 'pointer' }, onClick: () => goUpTo(0) }, '全公司'),
+                  (browse.path ?? []).map((d, i) =>
+                    h(Chip, {
+                      key: d.id, tone: i === browse.path.length - 1 ? 'brand' : 'neutral',
+                      style: { cursor: 'pointer' }, onClick: () => goUpTo(i + 1),
+                    }, d.name)),
+                  browse.loading ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '加载中…') : null),
+                browse.depts.length
+                  ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
+                      browse.depts.map((d) =>
+                        h(Chip, { key: d.id, tone: 'neutral', style: { cursor: 'pointer' }, onClick: () => navDept(d) }, `${d.name} ›`)))
+                  : !browse.loading
+                    ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '没有下级部门了')
+                    : null,
+                (browse.path ?? []).length && !browse.loading
+                  ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                      h('div', { className: 'wh-muted', style: { fontSize: 11 } },
+                        `当前部门直属成员（${(browse.members ?? []).length} 人，含下级部门成员请先进入对应部门）：`),
+                      h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
+                        (browse.members ?? []).map((m) => h(Chip, { key: m, tone: 'neutral' }, m))),
+                      h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                        h(Btn, { size: 'sm', variant: 'primary', disabled: browse.busy || !(browse.members ?? []).length, onClick: pickDept },
+                          browse.busy ? '添加中…' : '添加为部门分组'),
+                        h(Btn, { size: 'sm', variant: 'ghost', onClick: () => setBrowse(null) }, '关闭')))
+                  : null,
+                !browse.loading && (browse.members ?? []).length && !(browse.path ?? []).length
+                  ? h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '根目录成员为公司直属，进入具体部门后再添加')
+                  : null)
+            : null,
+          gEditId || editMembers
             ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 } },
                 h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
-                  h(WhInput, { style: { width: 150 }, placeholder: '部门名', value: gName, onChange: (e) => setGName(e.target.value) }),
-                  h(WhInput, { style: { width: 130 }, placeholder: '钉钉部门名', value: deptName, onChange: (e) => setDeptName(e.target.value) }),
-                  h(Btn, { size: 'sm', disabled: gBusy, onClick: importDept }, '从钉钉导入')),
-                h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
-                  h(WhInput, { style: { flex: 1, minWidth: 240 },
-                    placeholder: '成员（逗号分隔，支持别名：王昊:wanghao）', value: gMembers,
-                    onChange: (e) => setGMembers(e.target.value),
-                  }),
+                  h(WhInput, { style: { width: 160 }, placeholder: '部门名', value: gName, onChange: (e) => setGName(e.target.value) }),
                   h(Btn, { size: 'sm', variant: 'primary', disabled: gBusy, onClick: saveGroup }, gBusy ? '处理中…' : '保存部门'),
-                  h(Btn, { size: 'sm', onClick: () => { setGEditId(''); setGName(''); setGMembers('') } }, '取消')),
+                  h(Btn, { size: 'sm', onClick: () => { setGEditId(''); setGName(''); setEditMembers(null); setNewMember('') } }, '取消')),
+                (editMembers ?? []).map((m, i) =>
+                  h('div', { key: `${m.name}-${i}`, className: 'wh-toolbar', style: { gap: 6 } },
+                    h('span', { style: { width: 64, fontSize: 12.5, fontWeight: 500, flex: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, m.name),
+                    h(WhInput, {
+                      style: { flex: 1, minWidth: 140 }, placeholder: '别名 / git 署名（逗号分隔，可留空）', value: m.aliases,
+                      onChange: (e) => setEditMembers((p0) => (p0 ?? []).map((x, j) => (j === i ? { ...x, aliases: e.target.value } : x))),
+                    }),
+                    h(Btn, {
+                      size: 'sm', variant: 'ghost',
+                      onClick: () => setEditMembers((p0) => (p0 ?? []).filter((_, j) => j !== i)),
+                    }, '×'))),
+                h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                  h(WhInput, {
+                    style: { flex: 1, minWidth: 160 }, placeholder: '添加成员：名字 或 名字:别名1|别名2', value: newMember,
+                    onChange: (e) => setNewMember(e.target.value), onEnter: addMemberRow,
+                  }),
+                  h(Btn, { size: 'sm', onClick: addMemberRow }, '＋ 添加成员')),
                 gcand.length
                   ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
-                      h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '常见名字（点击加入成员）：'),
+                      h('span', { className: 'wh-muted', style: { fontSize: 11 } }, '常见名字（点击加入）：'),
                       gcand.map((c) =>
                         h(Chip, {
                           key: c, tone: 'neutral', style: { cursor: 'pointer' },
-                          onClick: () => {
-                            const cur = gMembers.split(/[,，\n]+/).map((s) => s.trim()).filter(Boolean)
-                            if (!cur.includes(c)) setGMembers([...cur, c].join(', '))
-                          },
+                          onClick: () => { if (!newMember.trim()) setNewMember(c) },
                         }, c)))
                   : null)
-            : h('div', { style: { marginTop: 8 } },
-                h(Btn, { size: 'sm', onClick: () => { setGEditId(''); setGName(''); setGMembers('') } }, '＋ 新建部门'))),
+            : !browse
+              ? h('div', { style: { marginTop: 8, display: 'flex', gap: 6 } },
+                  h(Btn, { size: 'sm', variant: 'primary', onClick: () => fetchDept('1', []) }, '从钉钉组织架构选择'),
+                  h(Btn, {
+                    size: 'sm', onClick: () => {
+                      setGEditId(''); setGName(''); setEditMembers([]); setNewMember('')
+                    },
+                  }, '＋ 手动新建'))
+              : null),
         h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
