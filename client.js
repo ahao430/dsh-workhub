@@ -77,6 +77,16 @@ window.__ModuleLoader__.load({
 .wh-chip.ok{background:var(--wh-ok-soft);color:var(--wh-ok)}
 .wh-chip.warn{background:var(--wh-warn-soft);color:var(--wh-warn)}
 .wh-chip.bad{background:var(--wh-bad-soft);color:var(--wh-bad)}
+.wh-tabs{display:flex;gap:2px;border-bottom:1px solid var(--dsw-alias-border-l1);margin-bottom:12px}
+.wh-tab{padding:7px 14px;font-size:12.5px;cursor:pointer;border:none;background:none;
+  color:var(--dsw-alias-label-secondary);border-bottom:2px solid transparent;font-weight:500}
+.wh-tab:hover{color:var(--dsh-alias-label-primary,var(--dsw-alias-label-primary))}
+.wh-tab.on{color:var(--wh-accent);border-bottom-color:var(--wh-accent);font-weight:600}
+.wh-clamp{position:relative;max-height:160px;overflow:hidden}
+.wh-clamp::after{content:'';position:absolute;left:0;right:0;bottom:0;height:48px;
+  background:linear-gradient(transparent,var(--dsw-alias-bg-layer-1))}
+.wh-clamp.open{max-height:none;overflow:visible}
+.wh-clamp.open::after{display:none}
 .wh-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:7px;cursor:pointer;
   font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-primary);
   background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);
@@ -254,6 +264,32 @@ window.__ModuleLoader__.load({
         icon ? h('div', { className: 'big' }, icon) : null,
         h('div', null, title),
         hint ? h('div', { style: { fontSize: 11.5, opacity: 0.8 } }, hint) : null)
+    }
+
+    /** 页内 tab 切换：tabs = [[id, label]] */
+    function Tabs({ tabs, active, onChange }) {
+      return h('div', { className: 'wh-tabs' },
+        tabs.map(([id, label]) =>
+          h('button', {
+            key: id,
+            className: `wh-tab${active === id ? ' on' : ''}`,
+            onClick: () => onChange(id),
+          }, label)))
+    }
+
+    /** 进行中需求行：需求号 + 标题 + 状态 + 更新日期 */
+    function RequirementRow({ r, showDate = true }) {
+      return h('div', {
+        key: r.source_id ?? r.id,
+        style: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: 12.5 },
+      },
+        h(Chip, { tone: 'brand', style: { flex: 'none' } }, r.source_id ?? ''),
+        h('span', {
+          style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          title: r.title ?? '',
+        }, (r.title ?? '').replace(new RegExp(`^${r.source_id}\\s*`), '') || r.title || '(无标题)'),
+        h(Chip, { tone: 'warn', style: { flex: 'none' } }, r.status || '进行中'),
+        showDate && r.day ? h('span', { className: 'wh-muted', style: { flex: 'none', fontSize: 11 } }, String(r.day).slice(5)) : null)
     }
 
     function Skeleton({ rows = 3 }) {
@@ -464,6 +500,13 @@ window.__ModuleLoader__.load({
                 })),
           h(Card, { title: '工作活动趋势', sub: `粒度 · ${GRAN_LABEL[stats.range.granularity] ?? stats.range.granularity}` },
             h(StackedBars, { buckets, trend, maxN, bucketRequirements: stats.bucketRequirements }))),
+        (stats.inProgress ?? []).length
+          ? h(Card, {
+              title: `进行中需求 · ${stats.inProgress.length}`,
+              sub: `${stats.range.startDate} ~ ${stats.range.endDate} 内有更新 · 非终态需求，按最近更新倒序`,
+            },
+              stats.inProgress.map((r) => h(RequirementRow, { key: r.source_id, r })))
+          : null,
         cmp
           ? h(Card, {
               title: '周期对比',
@@ -922,14 +965,15 @@ window.__ModuleLoader__.load({
         err ? h('div', { style: { color: 'var(--wh-bad)', fontSize: 12 } }, err) : null)
     }
 
-    function ProjectDetail({ projectId }) {
+    function ProjectDetail({ projectId, range }) {
       const [data, setData] = useState(null)
       const [err, setErr] = useState(null)
+      const effRange = range?.preset || (range?.start && range?.end) ? range : { preset: 'last_30_days' }
       useEffect(() => {
         setData(null); setErr(null)
-        api(`/analytics/project?projectId=${projectId}&preset=last_30_days`)
+        api(`/analytics/project?projectId=${projectId}&${rangeQuery(effRange)}`)
           .then(setData).catch((e) => setErr(String(e.message)))
-      }, [projectId])
+      }, [projectId, effRange.preset, effRange.start, effRange.end])
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!data) return h(Loading)
       const p = data.project
@@ -959,6 +1003,13 @@ window.__ModuleLoader__.load({
                     h(Chip, { tone: 'neutral' }, st),
                     h('span', { className: 'wh-muted' }, `${n} 项`)))))
           : null,
+        (data.inProgress ?? []).length
+          ? h(Card, {
+              title: `进行中需求 · ${data.inProgress.length}`,
+              sub: `${data.range.startDate} ~ ${data.range.endDate} 内有更新 · 非终态需求`,
+            },
+              data.inProgress.map((r) => h(RequirementRow, { key: r.source_id, r })))
+          : null,
         h(Card, { title: 'AI 洞察与分析' },
           (data.insights ?? []).length
             ? h('div', { className: 'wh-list' }, data.insights.map((a) => h(InsightCard, { key: a.id, a })))
@@ -977,17 +1028,23 @@ window.__ModuleLoader__.load({
             : h(Empty, { icon: '◎', title: '暂无关联', hint: '检查项目关键词 / 群绑定，或先在数据管理同步' })))
     }
 
-    function ProjectsPage() {
+    function ProjectsPage({ range }) {
       const [data, setData] = useState(null)
       const [status, setStatus] = useState(null)
       const [msg, setMsg] = useState(null)
       const [selected, setSelected] = useState(null)
+      const [inprog, setInprog] = useState(null)
 
       const load = useCallback(() => {
         api('/projects').then(setData).catch((e) => setMsg(String(e.message)))
         api('/sync/status').then(setStatus).catch(() => {})
       }, [])
       useEffect(() => { void load() }, [load])
+      useEffect(() => {
+        setInprog(null)
+        api(`/analytics/inprogress/grouped?${rangeQuery(range)}`)
+          .then(setInprog).catch(() => setInprog({ groups: [] }))
+      }, [range.preset, range.start, range.end])
 
       const resolveNow = async () => {
         setMsg(null)
@@ -1038,7 +1095,20 @@ window.__ModuleLoader__.load({
                 h('tbody', null, rows))
             : h(Empty, { icon: '◎', title: '还没有项目', hint: '在下方创建第一个项目，或同步云效项目' })),
         selected && data?.projects?.some((p) => p.id === selected)
-          ? h(ProjectDetail, { projectId: selected })
+          ? h(ProjectDetail, { projectId: selected, range })
+          : null,
+        (inprog?.groups ?? []).length
+          ? h(Card, {
+              title: `进行中需求 · ${inprog.groups.reduce((a, g) => a + g.total, 0)} 项 / ${inprog.groups.length} 个项目`,
+              sub: `${inprog.range?.startDate ?? ''} ~ ${inprog.range?.endDate ?? ''} 内有更新 · 每项目展示前 3 条`,
+            },
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+                inprog.groups.map((g) =>
+                  h('div', { key: g.projectId },
+                    h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between', marginBottom: 2 } },
+                      h('span', { style: { fontWeight: 550 } }, g.name),
+                      h(Chip, { tone: 'brand' }, `进行中 ${g.total}`)),
+                    g.items.map((r) => h(RequirementRow, { key: r.source_id, r }))))))
           : null,
         h(Card, { title: '新建项目' },
           h(ProjectForm, { chats: status?.chats ?? [], onCreated: load })),
@@ -1206,6 +1276,7 @@ window.__ModuleLoader__.load({
       const [busyGen, setBusyGen] = useState(false)
       const [genMsg, setGenMsg] = useState(null)
       const [expanded, setExpanded] = useState(false)
+      const [tab, setTab] = useState('summary')
       const reload = useCallback(() => {
         setData(null); setErr(null)
         const q = new URLSearchParams({ date })
@@ -1436,30 +1507,49 @@ window.__ModuleLoader__.load({
                 showAll ? '收起原始事件' : `展开全部 ${data.events.length} 条原始事件`)))
         : h(Empty, { icon: '◌', title: '当日无工作事件' })
 
+      const inProgress = data.inProgress ?? []
+      const summaryCard = h(Card, {
+        title: `${date} 每日总结`,
+        sub: [
+          data.metrics?.checkIn ? `打卡 ${data.metrics.checkIn}–${data.metrics.checkOut ?? '未打卡下班'}` : null,
+          data.metrics?.worklogHours ? `报工 ${data.metrics.worklogHours}h` : null,
+          ...Object.entries(byType).map(([t, n]) => `${typeLabel(t)} ${n}`),
+        ].filter(Boolean).join(' · '),
+        action: h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+          h(Btn, {
+            size: 'sm',
+            variant: 'primary',
+            disabled: busyGen,
+            onClick: quickGenerate,
+          }, busyGen ? '生成中…' : '快捷生成总结'),
+          h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, copied ? '已复制 ✓' : 'AI 精修')),
+      },
+        genMsg ? h('div', { className: 'wh-muted', style: { marginBottom: 8 } }, genMsg) : null,
+        summaryBlock,
+        ...extraBlocks)
+      const inProgressCard = h(Card, {
+        title: `进行中需求 · ${inProgress.length}`,
+        sub: '当日有更新的非终态需求',
+      },
+        inProgress.length
+          ? inProgress.map((r) => h(RequirementRow, { key: r.source_id, r }))
+          : h(Empty, { icon: '◇', title: '当日无进行中需求更新', hint: '切换更宽的时间范围可在驾驶舱查看更多' }))
+      const timelineCard = h(Card, { title: `工作事件时间线 · ${data.events.length}`, sub: '按发生时间排列 · 点击可对照原始来源' },
+        timeline)
+
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } },
-        h(Card, {
-          title: `${date} 每日总结`,
-          sub: [
-            data.metrics?.checkIn ? `打卡 ${data.metrics.checkIn}–${data.metrics.checkOut ?? '未打卡下班'}` : null,
-            data.metrics?.worklogHours ? `报工 ${data.metrics.worklogHours}h` : null,
-            ...Object.entries(byType).map(([t, n]) => `${typeLabel(t)} ${n}`),
-          ].filter(Boolean).join(' · '),
-          action: h('div', { className: 'wh-toolbar', style: { gap: 6 } },
-            h(Btn, {
-              size: 'sm',
-              variant: 'primary',
-              disabled: busyGen,
-              onClick: quickGenerate,
-            }, busyGen ? '生成中…' : '快捷生成总结'),
-            h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, copied ? '已复制 ✓' : 'AI 精修')),
-        },
-          genMsg ? h('div', { className: 'wh-muted', style: { marginBottom: 8 } }, genMsg) : null,
-          summaryBlock,
-          ...extraBlocks),
-        milestoneBlock,
-        meetingBlock,
-        h(Card, { title: `工作事件时间线 · ${data.events.length}`, sub: '按发生时间排列 · 点击可对照原始来源' },
-          timeline))
+        h(Tabs, {
+          tabs: [
+            ['summary', '总结'],
+            ['req', `需求 · ${inProgress.length + milestones.length}`],
+            ['events', `事件 · ${data.events.length}`],
+          ],
+          active: tab,
+          onChange: setTab,
+        }),
+        tab === 'summary' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, summaryCard, meetingBlock) : null,
+        tab === 'req' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, inProgressCard, milestoneBlock) : null,
+        tab === 'events' ? timelineCard : null)
     }
 
     /** Small badge used inside calendar cells: 打卡 / 报工. */
@@ -1640,6 +1730,7 @@ window.__ModuleLoader__.load({
       const [summaries, setSummaries] = useState(null)
       const [busy, setBusy] = useState('')
       const [msg, setMsg] = useState(null)
+      const [openReports, setOpenReports] = useState({})
 
       const loadSummaries = useCallback(() => {
         api('/summaries?days=90').then((r) => setSummaries(r.summaries)).catch(() => setSummaries([]))
@@ -1690,20 +1781,25 @@ window.__ModuleLoader__.load({
       const exportMd = (id) => window.open(`/api/workhub/analyses/export?id=${encodeURIComponent(id)}`, '_blank')
       const exportDaily = (date) => window.open(`/api/workhub/summaries/export?date=${encodeURIComponent(date)}`, '_blank')
 
-      const reportCards = reports.map((a) =>
-        h(Card, {
+      const reportCards = reports.map((a) => {
+        const open = !!openReports[a.id]
+        return h(Card, {
           key: a.id,
           title: a.payload?.title || '报告草稿',
           sub: `${new Date(a.generatedAt).toLocaleString()} · 依据 ${a.sources?.length ?? 0} 条记录${a.payload?.generatedBy === 'rule' ? ' · 规则版' : ' · AI'}`,
           action: h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+            h(Btn, { size: 'sm', variant: 'ghost', onClick: () => setOpenReports({ ...openReports, [a.id]: !open }) },
+              open ? '收起' : '展开全文'),
             h(Btn, { size: 'sm', onClick: () => exportMd(a.id) }, '导出 Markdown'),
             h(Btn, { size: 'sm', variant: 'ghost', onClick: () => delReport(a.id, a.payload?.title ?? '报告草稿') }, '删除')),
         },
-          a.payload?.overview ? h('p', { style: { margin: '0 0 10px', lineHeight: 1.65 } }, a.payload.overview) : null,
-          (a.payload?.sections ?? []).map((sec, i) =>
-            h('div', { key: i, style: { marginBottom: 10 } },
-              h('div', { className: 'wh-section-title' }, sec.title),
-              h('div', { style: { fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.65 } }, sec.content)))))
+          h('div', { className: `wh-clamp${open ? ' open' : ''}` },
+            a.payload?.overview ? h('p', { style: { margin: '0 0 10px', lineHeight: 1.65 } }, a.payload.overview) : null,
+            (a.payload?.sections ?? []).map((sec, i) =>
+              h('div', { key: i, style: { marginBottom: 10 } },
+                h('div', { className: 'wh-section-title' }, sec.title),
+                h('div', { style: { fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.65 } }, sec.content)))))
+      })
 
       const summaryCards = (summaries ?? []).map((sm) =>
         h(Card, {
@@ -1858,9 +1954,9 @@ window.__ModuleLoader__.load({
           : null)
     }
 
-    function ChatInsightsPage() {
+    function ChatInsightsPage({ initialChatId = '' }) {
       const [status, setStatus] = useState(null)
-      const [chatId, setChatId] = useState('')
+      const [chatId, setChatId] = useState(initialChatId)
       const [input, setInput] = useState(null)
       const [err, setErr] = useState(null)
       const [busyCollect, setBusyCollect] = useState(false)
@@ -1922,18 +2018,26 @@ window.__ModuleLoader__.load({
                 title: input.chat.name || chatId,
                 sub: `近 14 天 · ${input.stats.total} 条消息 · ${input.stats.participants} 人参与`,
               },
-                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-                  senderEntries.map(([s, n]) =>
-                    h(BarRow, {
-                      key: s,
-                      name: s,
-                      value: Math.round((n / input.stats.total) * 100),
-                      max: 100,
-                      color: 'var(--wh-accent)',
-                    })))),
-              h(Card, { title: '最近消息', sub: '前 30 条 · 用于人工核对' },
-                h('div', null,
-                  (input.messages ?? []).slice(0, 30).map((m) =>
+                h('div', { className: 'wh-stats', style: { marginBottom: 10 } },
+                  h(Stat, { label: '消息数', value: input.stats.total }),
+                  h(Stat, { label: '参与人数', value: input.stats.participants }),
+                  h(Stat, { label: '发言人数', value: senderEntries.length })),
+                senderEntries.length
+                  ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                      senderEntries.map(([s, n]) =>
+                        h(BarRow, {
+                          key: s,
+                          name: s,
+                          value: Math.round((n / input.stats.total) * 100),
+                          max: 100,
+                          color: 'var(--wh-accent)',
+                        })))
+                  : h(Empty, { icon: '◇', title: '暂无发言统计', hint: '采集会话后显示' })),
+              h(Card, { title: '最近消息', sub: '前 20 条 · 用于人工核对' },
+                h('div', {
+                  style: { maxHeight: 430, overflowY: 'auto', paddingRight: 4 },
+                },
+                  (input.messages ?? []).slice(0, 20).map((m) =>
                     h('div', { key: m.itemId, className: 'wh-msg' },
                       h('div', { className: 'wh-msg-meta' }, `${m.day?.slice(5)} ${m.sender}`),
                       h('div', { className: 'wh-msg-text' }, m.text))))))
@@ -1989,7 +2093,7 @@ window.__ModuleLoader__.load({
     const envTone = (s) => (s === 'RUNNING' ? 'ok' : s === 'DEPLOYING' ? 'brand' : s === 'ERROR' ? 'bad' : 'neutral')
     const orderTone = (s) => (s === 'SUCCESS' ? 'ok' : s === 'FAILED' ? 'bad' : s === 'RUNNING' || s === 'INIT' || s === 'PREPARING' ? 'brand' : 'neutral')
 
-    function ActionsPage() {
+    function ActionsPage({ initialTab = 'flow' }) {
       const [data, setData] = useState(null)
       const [msg, setMsg] = useState(null)
       const [busy, setBusy] = useState('')
@@ -2041,25 +2145,25 @@ window.__ModuleLoader__.load({
 
       const pipelines = data?.pipelines ?? []
       const actions = data?.actions ?? []
+      const [actTab, setActTab] = useState(initialTab)
 
-      return h('div', { className: 'wh-content' },
-        msg ? h('div', { className: 'wh-card', style: { fontSize: 12 } }, msg) : null,
-        h(Card, { title: '云效流水线', sub: `${pipelines.length} 条 · 运行需二次确认` },
-          pipelines.length
-            ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-                pipelines.map((p) =>
-                  h('div', {
-                    key: p.id,
-                    className: 'wh-toolbar',
-                    style: { justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
-                  },
-                    h('div', null,
-                      h('div', { style: { fontWeight: 500 } }, p.title?.replace('流水线 · ', '') || p.source_id),
-                      h('div', { className: 'wh-muted' }, `id ${p.source_id}${p.occurred_at ? ` · ${new Date(p.occurred_at).toLocaleDateString()}` : ''}`)),
-                    h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => run(p.source_id, p.title) },
-                      busy === p.source_id ? '运行中…' : '运行'))))
-            : h(Empty, { icon: '⚙', title: '暂无流水线', hint: '先在数据管理同步 yunxiao.pipelines' })),
-        h(Card, { title: '应用交付', sub: `${appsData?.apps?.length ?? 0} 个应用 · 环境与部署单实时查询 · 部署需二次确认` },
+      const flowCard = h(Card, { title: '云效流水线', sub: `${pipelines.length} 条 · 运行需二次确认` },
+        pipelines.length
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+              pipelines.map((p) =>
+                h('div', {
+                  key: p.id,
+                  className: 'wh-toolbar',
+                  style: { justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+                },
+                  h('div', null,
+                    h('div', { style: { fontWeight: 500 } }, p.title?.replace('流水线 · ', '') || p.source_id),
+                    h('div', { className: 'wh-muted' }, `id ${p.source_id}${p.occurred_at ? ` · ${new Date(p.occurred_at).toLocaleDateString()}` : ''}`)),
+                  h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => run(p.source_id, p.title) },
+                    busy === p.source_id ? '运行中…' : '运行'))))
+          : h(Empty, { icon: '⚙', title: '暂无流水线', hint: '先在数据管理同步 yunxiao.pipelines' }))
+
+      const appstackCard = h(Card, { title: '应用交付', sub: `${appsData?.apps?.length ?? 0} 个应用 · 环境与部署单实时查询 · 部署需二次确认` },
           appsData?.error
             ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${appsData.error.message}`)
             : (appsData?.apps?.length ?? 0) === 0
@@ -2108,7 +2212,17 @@ window.__ModuleLoader__.load({
                                       h('span', null, `${ORDER_TYPE[o.type] ?? o.type ?? '—'} · ${o.name}`)),
                                     h('span', { className: 'wh-muted', style: { whiteSpace: 'nowrap' } },
                                       o.createdAt ? new Date(o.createdAt).toLocaleString() : ''))))
-                            : null))),
+                            : null)))
+
+      return h('div', { className: 'wh-content' },
+        msg ? h('div', { className: 'wh-card', style: { fontSize: 12 } }, msg) : null,
+        h(Tabs, {
+          tabs: [['flow', `流水线 · ${pipelines.length}`], ['appstack', `应用交付 · ${appsData?.apps?.length ?? 0}`]],
+          active: actTab,
+          onChange: setActTab,
+        }),
+        actTab === 'flow' ? flowCard : null,
+        actTab === 'appstack' ? appstackCard : null,
         h(Card, { title: '操作审计日志', sub: '所有写操作留痕' },
           actions.length
             ? h('table', { className: 'wh-table' },
@@ -2199,7 +2313,7 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [page])
       const current = PAGES.find(([id]) => id === page) ?? PAGES[0]
-      const usesTime = ['dashboard', 'efficiency', 'reports'].includes(current[0])
+      const usesTime = ['dashboard', 'efficiency', 'reports', 'projects'].includes(current[0])
 
       let lastGroup = null
       const nav = []
@@ -2236,7 +2350,7 @@ window.__ModuleLoader__.load({
 
       const pageProps = current[0] === 'dashboard'
         ? { range, setRange }
-        : current[0] === 'efficiency' || current[0] === 'reports'
+        : current[0] === 'efficiency' || current[0] === 'reports' || current[0] === 'projects'
           ? { range }
           : null
       const body = h(ErrorBoundary, { name: current[1], key: current[0] },

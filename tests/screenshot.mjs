@@ -54,11 +54,27 @@ const MOCK = {
       { id: 'p3', name: '示例项目 C', source_type: 'requirement', n: 5 },
     ],
     activeProjects: 3,
+    inProgress: [
+      { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
+      { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-03' },
+      { source_id: 'DEMO-106', title: 'DEMO-106 会员权益行权限制', status: '测试中', day: '2026-11-03' },
+    ],
     compare: {
       range: { startDate: '2026-10-30', endDate: '2026-11-01' },
       counts: { attendance: 4, chat_message: 150, commit: 30, milestone: 18, report: 3, requirement: 6 },
       activeProjects: 2,
     },
+  },
+  '/api/workhub/analytics/inprogress/grouped?': {
+    range: { startDate: '2026-10-06', endDate: '2026-11-04' },
+    groups: [
+      { projectId: 'p1', name: '示例项目 A', total: 5, items: [
+        { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
+        { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-03' },
+        { source_id: 'DEMO-106', title: 'DEMO-106 会员权益行权限制', status: '测试中', day: '2026-11-02' }] },
+      { projectId: 'p2', name: '示例项目 B', total: 2, items: [
+        { source_id: 'DEMO-108', title: 'DEMO-108 建站模板升级', status: '待完成', day: '2026-11-01' }] },
+    ],
   },
   '/api/workhub/analyses?kind=insight': {
     analyses: [
@@ -149,6 +165,10 @@ const MOCK = {
       sources: new Array(18).fill(0).map(() => ({ sourceType: 'commit' })),
       generatedAt: '2026-11-04T10:00:00Z',
     },
+    inProgress: [
+      { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
+      { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-04' },
+    ],
   },
   '/api/workhub/projects': {
     projects: [
@@ -214,6 +234,11 @@ const MOCK = {
       commit: [{ id: 'c1', occurredAt: '2026-11-03', title: 'DEMO-101 接口适配：兼容旧版返回结构' }, { id: 'c2', occurredAt: '2026-11-02', title: 'DEMO-101 缓存层重构' }],
       requirement: [{ id: 'r1', occurredAt: '2026-11-02', title: 'DEMO-101 示例需求：接口兼容改造' }],
     },
+    inProgress: [
+      { source_id: 'DEMO-107', title: 'DEMO-107 示例网关超时参数调优', status: '架构系分+开发中', day: '2026-11-04' },
+      { source_id: 'DEMO-105', title: 'DEMO-105 审计日志接入需求', status: '待处理', day: '2026-11-03' },
+      { source_id: 'DEMO-106', title: 'DEMO-106 会员权益行权限制', status: '测试中', day: '2026-11-02' },
+    ],
   },
   '/api/workhub/analytics/efficiency?': {
     range: { startDate: '2026-10-06', endDate: '2026-11-04' },
@@ -460,10 +485,26 @@ function write(name, tree) {
 const pages = Object.fromEntries(D.PAGES.map(([id, label, Comp]) => [id, { label, Comp }]))
 
 async function main() {
+  const actionsComp = pages.actions?.Comp
   for (const [id, label, Comp] of D.PAGES) {
-    const props = id === 'dashboard' ? { range: { preset: 'this_week', granularity: null, compare: true }, setRange: () => {} } : id === 'efficiency' ? { range: { preset: 'last_30_days' } } : id === 'reports' ? { range: { preset: 'this_week' } } : null
+    if (id === 'actions') continue // 单独处理：两个 tab 拼一张图
+    const props = id === 'dashboard'
+      ? { range: { preset: 'this_week', granularity: null, compare: true }, setRange: () => {} }
+      : id === 'chats' ? { initialChatId: 'cid_demo_1' }
+        : id === 'efficiency' || id === 'projects' ? { range: { preset: 'last_30_days', granularity: null, compare: false } }
+          : id === 'reports' ? { range: { preset: 'this_week' } } : null
     const tree = await render(Comp, props)
     write(id, shell({ title: label, sub: '示例数据 · 仅用于展示', navLabel: label, body: tree, PAGES: D.PAGES, h: ReactStub.createElement }))
+  }
+
+  // actions：流水线 tab + 应用交付 tab 拼一张图（wrapper 命名不同 → hook 状态隔离）
+  if (actionsComp) {
+    const tabFlow = await render(function WrapActionsFlow() { return ReactStub.createElement(actionsComp, {}) }, {})
+    const tabAppstack = await render(function WrapActionsAppstack() { return ReactStub.createElement(actionsComp, { initialTab: 'appstack' }) }, {})
+    write('actions', shell({
+      title: '快捷执行', sub: '示例数据 · 仅用于展示', navLabel: '快捷执行', PAGES: D.PAGES, h: ReactStub.createElement,
+      body: ReactStub.createElement('div', { className: 'wh-content' }, tabFlow, tabAppstack),
+    }))
   }
 
   // project detail
