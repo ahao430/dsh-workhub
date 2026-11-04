@@ -2888,6 +2888,40 @@ react-is/cjs/react-is.production.js:
     /* 快捷执行页内存缓存：切页不丢状态，回页秒显再后台刷新 */
     const actionsMem = { data: null, appsData: null, selApp: '', detail: {} }
 
+    /* 研发流程阶段行：展开运行表单（分支 / 运行变量 / 备注） */
+    function FlowStageRow({ app, wf, st, busy, onRun }) {
+      const [open, setOpen] = useState(false)
+      const [branch, setBranch] = useState(st.branch ?? 'master')
+      const [vars, setVars] = useState(() => Object.entries(st.params ?? {}).map(([k, v]) => ({ k, v })))
+      const [comment, setComment] = useState('')
+      const running = busy === `flow:${st.sn}`
+      return h('div', { style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: '6px 10px', flex: '1 1 240px', minWidth: 240 } },
+        h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+          h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+            h('span', { style: { fontWeight: 550, fontSize: 12.5 } }, st.name),
+            st.envType ? h(Chip, { tone: st.envType.includes('生产') ? 'bad' : st.envType.includes('预发') ? 'warn' : 'ok' }, st.envType) : null),
+          h(Btn, { size: 'sm', variant: open ? 'ghost' : 'primary', disabled: running, onClick: () => setOpen(!open) },
+            running ? '提交中…' : open ? '收起' : '运行')),
+        open
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 } },
+              h(WhInput, { value: branch, onChange: (e) => setBranch(e.target.value), placeholder: st.sourceLabel ? `分支（代码源 ${st.sourceLabel}）` : '分支' }),
+              vars.map((row, i) =>
+                h('div', { key: row.k, className: 'wh-toolbar', style: { gap: 5 } },
+                  h('span', { className: 'wh-muted', style: { fontSize: 11, width: 80, flex: 'none', overflow: 'hidden', textOverflow: 'ellipsis' } }, row.k),
+                  h(WhInput, {
+                    style: { flex: 1 }, value: row.v,
+                    onChange: (e) => setVars((p0) => (p0 ?? []).map((x, j) => (j === i ? { ...x, v: e.target.value } : x))),
+                  }))),
+              h(WhInput, { value: comment, onChange: (e) => setComment(e.target.value), placeholder: '运行备注（可选）' }),
+              h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                h(Btn, {
+                  size: 'sm', variant: 'primary', disabled: running,
+                  onClick: () => onRun(wf, st, { branch, comment, params: Object.fromEntries(vars.map((r) => [r.k, r.v])) }),
+                }, '确认运行'),
+                h(Btn, { size: 'sm', onClick: () => setOpen(false) }, '取消')))
+          : null)
+    }
+
     function ActionsPage({ initialTab = 'flow' }) {
       const [data, setData] = useState(actionsMem.data)
       const [msg, setMsg] = useState(null)
@@ -2982,6 +3016,19 @@ react-is/cjs/react-is.production.js:
           void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
           load()
         } catch (e) { setMsg(`回滚失败: ${e.message}`) } finally { setBusy('') }
+      }
+
+      const runFlowStage = async (wf, st, { branch, comment, params }) => {
+        if (!selApp) return
+        setBusy(`flow:${st.sn}`); setMsg(null)
+        try {
+          await api('/actions/appstack/flow/run', {
+            method: 'POST',
+            body: JSON.stringify({ app: selApp, workflowSn: wf.sn, stageSn: st.sn, branch, sourceLabel: st.sourceLabel, comment, params, userConfirmed: true }),
+          })
+          setMsg(`研发流程「${wf.name} · ${st.name}」已触发${branch ? `（分支 ${branch}）` : ''}，可在云效流水线查看进度`)
+          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
+        } catch (e) { setMsg(`运行失败: ${e.message}`) } finally { setBusy('') }
       }
 
       const deploy = async (envName) => {
@@ -3122,6 +3169,16 @@ react-is/cjs/react-is.production.js:
                                 title: (detail.envs ?? []).length ? '该筛选下无环境' : '该应用暂无环境',
                                 hint: (detail.envs ?? []).length ? '切换「全部环境」查看' : '在云效 Appstack 中为应用创建环境',
                               }),
+                          (detail.releaseFlows ?? []).length
+                            ? h('div', { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 } },
+                                h('div', { style: { fontWeight: 550, fontSize: 12.5 } }, '研发流程 · 多环境部署'),
+                                (detail.releaseFlows ?? []).map((wf) =>
+                                  h('div', { key: wf.sn, style: { display: 'flex', flexDirection: 'column', gap: 5 } },
+                                    h('div', { className: 'wh-muted', style: { fontSize: 11 } }, wf.name),
+                                    h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                                      wf.stages.map((st) => h(FlowStageRow, { key: st.sn, app: detail.app, wf, st, busy, onRun: runFlowStage })))))
+                                )
+                            : null,
                           (detail.orders ?? []).length
                             ? h('div', { style: { marginTop: 6 } },
                                 h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '最近部署单'),

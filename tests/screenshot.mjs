@@ -286,6 +286,17 @@ const MOCK = {
       { name: 'test', displayName: '测试环境', state: 'DEPLOYING', deployGroup: 'k8s-test' },
       { name: 'dev', displayName: '开发环境', state: 'ERROR', deployGroup: 'k8s-dev' },
     ],
+    releaseFlows: [
+      {
+        name: '标准研发流程', sn: 'ac420150950a41148d9b65c2c1f91d74',
+        stages: [
+          { name: '开发阶段', sn: 'aa06992f40a84abd8be228cff20c01a3', envType: '开发环境', pipelineId: 4809853, pipelineName: 'ai/new-api-dev', branch: 'master', sourceLabel: 'new-api', params: { release: '1.0.8', app: 'new-api' } },
+          { name: '测试阶段', sn: '8583bf82ee0c4d0f9f7c11a1bb22c02b', envType: '测试环境', pipelineId: 4809854, pipelineName: 'ai/new-api-test', branch: 'master', sourceLabel: 'new-api', params: { release: '1.0.8', app: 'new-api' } },
+          { name: '预发阶段', sn: 'f6eb0ad83d6f4c9bb9f50d0eaa33c03d', envType: '预发环境', pipelineId: 4809855, pipelineName: 'ai/new-api-pre', branch: 'master', sourceLabel: 'new-api', params: { release: '1.0.8', app: 'new-api' } },
+          { name: '生产阶段', sn: 'f5d18782c1a94e7eae0dcb0edd44c04e', envType: '生产环境', pipelineId: 4809856, pipelineName: 'ai/new-api-prod', branch: 'master', sourceLabel: 'new-api', params: { release: '1.0.9', app: 'new-api' } },
+        ],
+      },
+    ],
     orders: [
       { name: '20261103174120-部署-workhub', type: 'Deploy', state: 'SUCCESS', version: '20261103174120-31', sn: '9d7b7635e65047129c3099b269117a1b', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'production', artifacts: { 'image.backend': 'registry.cn-beijing/bsplatform/audit-console:1.0.5' }, createdAt: '2026-11-03T09:41:20.000Z' },
       { name: '20261101153002-部署-flow', type: 'Deploy', state: 'SUCCESS', version: '20261101153002-30', sn: '3800921169404a61ab4e6785d49d0f01', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'daily', artifacts: { 'image.backend': 'registry.cn-beijing/bsplatform/audit-console:1.0.3' }, createdAt: '2026-11-01T07:30:02.000Z' },
