@@ -1183,6 +1183,8 @@ react-is/cjs/react-is.production.js:
       const [markFor, setMarkFor] = useState('')
       const [markGroup, setMarkGroup] = useState('')
       const [markMember, setMarkMember] = useState('')
+      const [hist, setHist] = useState(null)
+      const [notify, setNotify] = useState({ enabled: false, chatId: '' })
 
       const refreshGroups = useCallback(() => api('/groups').then((r) => {
         setGroups(r.groups ?? [])
@@ -1196,6 +1198,21 @@ react-is/cjs/react-is.production.js:
       useEffect(() => {
         void api('/onboarding/detect').then(setOb).catch(() => {})
       }, [])
+      useEffect(() => {
+        void api('/actions/history').then((r) => setHist(r.ops ?? [])).catch(() => {})
+        void api('/actions/appstack/notify-prefs').then(setNotify).catch(() => {})
+      }, [])
+      const saveNotify = async (next) => {
+        try {
+          const r = await api('/actions/appstack/notify-prefs', { method: 'POST', body: JSON.stringify(next) })
+          setNotify({ enabled: r.enabled, chatId: r.chatId })
+          toast(next.enabled ? '发布完成通知已开启' : '发布完成通知已关闭')
+        } catch (e) { setMsg(`通知设置失败: ${e.message}`) }
+      }
+      const ACTION_LABEL = {
+        'appstack.deploy': '部署', 'appstack.rollback': '回滚', 'appstack.flowRun': '研发流程运行',
+        'appstack.update': '应用更新', 'plugin.update': '插件更新',
+      }
 
       const applyOnboarding = async () => {
         if (!ob?.self?.name) return
@@ -1610,6 +1627,39 @@ react-is/cjs/react-is.production.js:
                     },
                   }, '＋ 手动新建'))
               : null),
+        h(Card, {
+          title: '发布完成通知',
+          sub: '研发阶段/部署结束后自动推送到选定的钉钉群（本机 dws 发送）',
+        },
+          h('div', { className: 'wh-toolbar', style: { gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
+            h(WhSelect, {
+              value: notify.chatId, style: { flex: 1, minWidth: 220 },
+              onChange: (e) => setNotify((p0) => ({ ...p0, chatId: e.target.value })),
+              placeholder: '选择接收通知的群聊',
+              options: (status?.chats ?? []).map((c) => ({ value: c.conversation_id, label: c.name || c.conversation_id.slice(0, 20) })),
+            }),
+            h(Btn, { size: 'sm', disabled: !notify.chatId, onClick: () => saveNotify({ chatId: notify.chatId }) }, '保存群'),
+            h(Btn, {
+              size: 'sm', variant: notify.enabled ? 'primary' : 'ghost',
+              disabled: !notify.chatId, onClick: () => saveNotify({ enabled: !notify.enabled, chatId: notify.chatId }),
+            }, notify.enabled ? '已开启（点关闭）' : '已关闭（点开启）')),
+          h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 6 } },
+            '触发研发阶段运行时自动盯梢；结束后把结果发到群里。需要本机 dws 已登录且有群发权限。')),
+        h(Card, {
+          title: '最近操作',
+          sub: '本机操作审计 · 部署 / 回滚 / 研发流程 / 更新',
+        },
+          (hist ?? []).length
+            ? h('div', { style: { display: 'flex', flexDirection: 'column' } },
+                hist.map((o, i) =>
+                  h('div', { key: i, className: 'wh-toolbar', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: i < hist.length - 1 ? '1px solid var(--dsw-alias-border-l1)' : 'none' } },
+                    h('div', { className: 'wh-toolbar', style: { gap: 6, minWidth: 0 } },
+                      h(Chip, { tone: o.status === 'ok' ? 'ok' : o.status === 'error' ? 'bad' : 'neutral' }, o.status || '—'),
+                      h('span', { style: { fontSize: 12 } }, ACTION_LABEL[o.action] ?? o.action),
+                      h('span', { className: 'wh-muted', style: { fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, o.target)),
+                    h('span', { className: 'wh-muted', style: { fontSize: 11, whiteSpace: 'nowrap' } },
+                      o.at ? new Date(o.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : ''))))
+            : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '暂无操作记录')),
         h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
@@ -3008,7 +3058,11 @@ react-is/cjs/react-is.production.js:
           .then((r) => {
             actionsMem.appsData = r
             setAppsData(r)
-            setSelApp((cur) => cur || r.apps?.[0]?.name || '')
+            const pend = actionsMem.pendingApp
+            if (pend && r.apps?.some((a) => a.name === pend)) {
+              setSelApp(pend)
+              actionsMem.pendingApp = ''
+            } else setSelApp((cur) => cur || r.apps?.[0]?.name || '')
           })
           .catch((e) => setAppsData((p0) => p0 ?? { apps: [], error: { message: String(e.message) } }))
       }, [])
@@ -3090,7 +3144,7 @@ react-is/cjs/react-is.production.js:
         try {
           await api('/actions/appstack/flow/run', {
             method: 'POST',
-            body: JSON.stringify({ app: selApp, workflowSn: wf.sn, stageSn: st.sn, branch, sourceLabel: st.sourceLabel, comment, params, userConfirmed: true }),
+            body: JSON.stringify({ app: selApp, workflowSn: wf.sn, stageSn: st.sn, pipelineId: st.pipelineId, stageName: st.name, branch, sourceLabel: st.sourceLabel, comment, params, userConfirmed: true }),
           })
           // 记住本次运行配置（分支/变量/备注），下次展开默认带出
           const key = `${selApp}/${st.sn}`
@@ -3233,6 +3287,7 @@ react-is/cjs/react-is.production.js:
                                   h('div', { style: { fontWeight: 500 } }, e.displayName || e.name),
                                   h('div', { className: 'wh-muted' }, `${e.name}${e.deployGroup ? ` · 部署组 ${e.deployGroup}` : ''}`)),
                                 h('div', { className: 'wh-toolbar', style: { gap: 6 } },
+                                  e.lockBy ? h(Chip, { tone: 'warn', title: `环境被锁定：${e.lockBy}` }, `🔒 ${String(e.lockBy).slice(0, 10)}…`) : null,
                                   h(Chip, { tone: envTone(e.state) }, ENV_STATE[e.state] ?? e.state ?? '未知'),
                                   h(Btn, { variant: 'danger', size: 'sm', disabled: !!busy, onClick: () => deploy(e.name) },
                                     busy === `deploy:${e.name}` ? '部署中…' : '部署'))))
@@ -3368,8 +3423,43 @@ react-is/cjs/react-is.production.js:
       const [dsStatus, setDsStatus] = useState(null)
       const [groups, setGroups] = useState([])
       const [scope, setScope] = useState(viewMem.groupId)
+      const [pal, setPal] = useState(null) // null | { q, idx }
       useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
+      // 应用列表拉一次（服务端 5 分钟缓存），喂给命令面板 + 预热快捷执行页
+      useEffect(() => {
+        if (!actionsMem.appsData) void api('/actions/appstack').then((r) => { actionsMem.appsData = r }).catch(() => {})
+      }, [])
       const switchScope = (id) => { viewMem.groupId = id; setScope(id) }
+
+      // ⌘K / Ctrl+K 命令面板
+      useEffect(() => {
+        const onKey = (e) => {
+          if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') {
+            e.preventDefault()
+            setPal((p0) => (p0 ? null : { q: '', idx: 0 }))
+          }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [])
+      const palResults = (() => {
+        const q = String(pal?.q ?? '').trim().toLowerCase()
+        const pages = PAGES.filter(([, label]) => !q || label.toLowerCase().includes(q))
+          .map(([id, label, , , group]) => ({ kind: 'page', id, label, sub: group }))
+        const apps = actionsMem.appsData?.apps ?? []
+        const appHits = (q ? apps.filter((a) => a.name.toLowerCase().includes(q)) : apps).slice(0, 8)
+          .map((a) => ({ kind: 'app', id: a.name, label: a.name, sub: a.template || a.description || '应用交付' }))
+        return [...pages, ...appHits].slice(0, 12)
+      })()
+      const palPick = (item) => {
+        if (!item) return
+        if (item.kind === 'page') setPage(item.id)
+        else {
+          actionsMem.pendingApp = item.id
+          setPage('actions')
+        }
+        setPal(null)
+      }
       useEffect(() => {
         let alive = true
         const tick = () => api('/sources')
@@ -3437,7 +3527,12 @@ react-is/cjs/react-is.production.js:
             h('div', { className: 'wh-title' }, current[1]),
             h('div', { className: 'wh-toolbar', style: { gap: 6 } },
               h(DataSourcePill, { kind: 'ding', label: '钉钉', status: dsStatus?.ding, onClick: () => setPage('data') }),
-              h(DataSourcePill, { kind: 'yx', label: '云效', status: dsStatus?.yx, onClick: () => setPage('data') }))),
+              h(DataSourcePill, { kind: 'yx', label: '云效', status: dsStatus?.yx, onClick: () => setPage('data') }),
+              h('button', {
+                onClick: () => setPal({ q: '', idx: 0 }),
+                title: '搜索页面与应用（⌘K）',
+                style: { border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+              }, '⌘K'))),
           h('div', { className: 'wh-sub' }, current[3])),
         usesTime ? h(TimeBar, { range, onChange: setRange }) : null)
 
@@ -3453,7 +3548,45 @@ react-is/cjs/react-is.production.js:
         header,
         h('div', { className: 'wh-scroll' }, h(UpdateBanner), body))
 
-      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts)))
+      const palette = pal
+        ? h('div', {
+            style: { position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 120 },
+            onClick: () => setPal(null),
+          },
+            h('div', {
+              className: 'wh-card',
+              style: { width: 520, padding: 0, overflow: 'hidden' },
+              onClick: (e) => e.stopPropagation(),
+            },
+              h(WhInput, {
+                autoFocus: true, value: pal.q, allowClear: false,
+                placeholder: '搜索页面 / 应用…（↑↓ 选择，回车跳转，Esc 关闭）',
+                onChange: (e) => setPal({ q: e.target.value, idx: 0 }),
+                onKeyDown: (e) => {
+                  if (e.key === 'Escape') setPal(null)
+                  else if (e.key === 'ArrowDown') { e.preventDefault(); setPal((p0) => ({ ...p0, idx: Math.min((p0?.idx ?? 0) + 1, palResults.length - 1) })) }
+                  else if (e.key === 'ArrowUp') { e.preventDefault(); setPal((p0) => ({ ...p0, idx: Math.max((p0?.idx ?? 0) - 1, 0) })) }
+                  else if (e.key === 'Enter') palPick(palResults[pal.idx ?? 0])
+                },
+              }),
+              h('div', { style: { maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column' } },
+                palResults.length
+                  ? palResults.map((item, i) =>
+                      h('button', {
+                        key: `${item.kind}:${item.id}`,
+                        onClick: () => palPick(item),
+                        style: {
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                          padding: '8px 14px', border: 'none', cursor: 'pointer', textAlign: 'left',
+                          background: i === (pal.idx ?? 0) ? 'var(--wh-accent-soft)' : 'transparent',
+                          color: 'var(--dsw-alias-label-primary)', fontSize: 12.5,
+                        },
+                      },
+                        h('span', null, (item.kind === 'app' ? '🔧 ' : '▣ ') + item.label),
+                        h('span', { className: 'wh-muted', style: { fontSize: 11 } }, item.sub ?? '')))
+                  : h('div', { className: 'wh-muted', style: { padding: '14px', fontSize: 12 } }, '无匹配结果'))))
+            : null
+      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts), palette))
     }
 
     /* 更新提示横幅：只检测并提示，不做页面内自动更新（升级+重载由 DSH 助手或用户手动完成） */
