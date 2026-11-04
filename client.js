@@ -250,7 +250,20 @@ react-is/cjs/react-is.production.js:
 }
 /* __WH_ANTD_VENDOR_END__ */
 
+    /* GET 响应内存缓存：切页/预加载命中即秒开；动态端点（轮询/状态）不缓存。 */
+    const apiCache = new Map()
+    const API_TTL_MS = 90_000
+    const API_NO_CACHE = ['/actions/appstack/flow/status', '/update/check', '/dt/todos', '/dt/agenda', '/dt/approvals', '/depts']
+    const apiCachePeek = (path) => apiCache.get(path)?.data ?? null
+    const apiCacheClear = () => apiCache.clear()
+
     async function api(path, init) {
+      const isGet = !init || !init.method || String(init.method).toUpperCase() === 'GET'
+      const cacheable = isGet && !API_NO_CACHE.some((p) => path.startsWith(p))
+      if (cacheable) {
+        const hit = apiCache.get(path)
+        if (hit && Date.now() - hit.at < API_TTL_MS) return hit.data
+      }
       const res = await fetch(`/api/workhub${path}`, {
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
@@ -258,6 +271,10 @@ react-is/cjs/react-is.production.js:
       })
       const body = await res.json()
       if (!res.ok || !body.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`)
+      if (cacheable) {
+        if (apiCache.size > 200) apiCache.clear()
+        apiCache.set(path, { at: Date.now(), data: body })
+      }
       return body
     }
 
@@ -826,7 +843,7 @@ react-is/cjs/react-is.production.js:
     }
 
     function Dashboard({ range, setRange, scope = '' }) {
-      const [stats, setStats] = useState(null)
+      const [stats, setStats] = useState(() => (scope ? null : apiCachePeek('/analytics/dashboard?preset=this_week')))
       const [err, setErr] = useState(null)
       const insights = useInsights({ kind: 'insight' })
       const load = useCallback(() => {
@@ -2485,7 +2502,7 @@ react-is/cjs/react-is.production.js:
     }
 
     /** One calendar cell: date + attendance window + worklog hours (no counts, no milestones). */
-    function CalCell({ date, d, selected, todayIso, onClick, tall }) {
+    function CalCell({ date, d, selected, todayIso, onClick, tall, loading }) {
       const isSel = date === selected
       const isToday = date === todayIso
       const events = d?.events ?? 0
@@ -2529,7 +2546,7 @@ react-is/cjs/react-is.production.js:
               d.checkOut ? h('span', { className: 'wh-cal-att-sep' }, '–') : null,
               d.checkOut ? h('span', { className: 'wh-cal-att-time' }, d.checkOut) : null,
               d.attendanceComplete ? null : h('span', { className: 'wh-cal-att-warn', title: '仅一次打卡，可能缺卡' }, '单次'))
-          : date <= todayIso && ![0, 6].includes(new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))).getDay())
+          : !loading && date <= todayIso && ![0, 6].includes(new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))).getDay())
             ? h('div', { className: 'wh-cal-att' },
                 h('span', { className: 'wh-cal-att-time', style: { opacity: 0.55 } }, '未打卡'))
             : null,
@@ -2549,7 +2566,7 @@ react-is/cjs/react-is.production.js:
       const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
       const [month, setMonth] = useState(todayIso.slice(0, 7))
       const [selected, setSelected] = useState(todayIso)
-      const [data, setData] = useState(null)
+      const [data, setData] = useState(() => apiCachePeek(`/calendar?month=${todayIso.slice(0, 7)}`))
       const [projects, setProjects] = useState([])
       const [projectFilter, setProjectFilter] = useState('')
       const [view, setView] = useState('month')
@@ -2603,7 +2620,7 @@ react-is/cjs/react-is.production.js:
 
       const cellEls = cells.map((date, i) => {
         if (!date) return h('div', { key: `e${i}`, className: 'wh-cal-cell blank' })
-        return h(CalCell, { key: date, date, d: byDate[date], selected, todayIso, onClick: () => setSelected(date) })
+        return h(CalCell, { key: date, date, d: byDate[date], selected, todayIso, loading: data === null, onClick: () => setSelected(date) })
       })
 
       const weekStart = (() => {
@@ -2618,7 +2635,7 @@ react-is/cjs/react-is.production.js:
       })()
 
       const weekEls = weekStart.map((date) =>
-        h(CalCell, { key: date, date, d: byDate[date], selected, todayIso, tall: true, onClick: () => setSelected(date) }))
+        h(CalCell, { key: date, date, d: byDate[date], selected, todayIso, tall: true, loading: data === null, onClick: () => setSelected(date) }))
 
       return h('div', { className: 'wh-content' },
         h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
@@ -3568,12 +3585,35 @@ react-is/cjs/react-is.production.js:
       useEffect(() => {
         if (!actionsMem.appsData) void api('/actions/appstack').then((r) => { actionsMem.appsData = r }).catch(() => {})
       }, [])
+      // 打开插件即预热常用页面数据：切菜单不出现空白（api 缓存命中后即时渲染）
+      useEffect(() => {
+        const month = new Date().toISOString().slice(0, 7)
+        const warm = [
+          '/analytics/dashboard?preset=this_week',
+          `/calendar?month=${month}`,
+          '/projects',
+          '/analytics/inprogress/grouped?preset=this_week',
+          '/analytics/efficiency?preset=this_week',
+          '/analyses?kind=report_draft',
+          '/analyses?kind=insight',
+          '/actions/pipelines',
+          '/actions/appstack/prefs',
+          '/sources',
+          '/sync/status',
+          '/identity',
+          '/reports/weekly',
+          '/actions/history',
+          '/actions/appstack/notify-prefs',
+        ]
+        for (const p of warm) void api(p).catch(() => {})
+      }, [])
       const switchScope = (id) => { viewMem.groupId = id; setScope(id) }
       /* 刷新全部：清服务端缓存 + 客户端内存 + 重挂载当前页面（各页重新拉数据） */
       const refreshAll = async () => {
         try {
           await api('/cache/flush', { method: 'POST', body: '{}' })
         } catch { /* 服务端不可用时仍重挂载 */ }
+        apiCacheClear()
         actionsMem.data = null
         actionsMem.appsData = null
         actionsMem.detail = {}
