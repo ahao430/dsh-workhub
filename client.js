@@ -2321,22 +2321,14 @@ window.__ModuleLoader__.load({
                     : null,
                   h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
                     h('input', {
-                      className: 'wh-input', style: { width: 230 },
+                      className: 'wh-input', style: { width: 200 },
                       placeholder: `搜索 ${allApps.length} 个应用 / 备注…`, value: search,
                       onChange: (e) => setSearch(e.target.value),
                     }),
-                    h('select', {
-                      className: 'wh-select', value: envFilter,
-                      onChange: (e) => setEnvFilter(e.target.value),
-                    },
-                      h('option', { value: '' }, '全部环境'),
-                      (detail?.envs ?? []).map((e) =>
-                        h('option', { key: e.name, value: e.name }, `${e.displayName || e.name} (${e.name})`)))),
-                  h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
                     h('div', { className: 'wh-toolbar', style: { gap: 6, flex: 1, minWidth: 0 } },
                       filteredApps.length
                         ? h('select', {
-                            className: 'wh-select', style: { flex: 1, minWidth: 160 }, value: selApp,
+                            className: 'wh-select', style: { flex: 1, minWidth: 140 }, value: selApp,
                             onChange: (e) => setSelApp(e.target.value),
                           },
                             filteredApps.map((a) =>
@@ -2348,10 +2340,7 @@ window.__ModuleLoader__.load({
                             size: 'sm', variant: 'ghost', onClick: toggleFav,
                             title: favNames.includes(selApp) ? '从常用移除' : '加入常用',
                           }, favNames.includes(selApp) ? '★ 已收藏' : '☆ 收藏')
-                        : null),
-                    detail?.orchestration?.sha
-                      ? h('span', { className: 'wh-muted', style: { fontSize: 11 } }, `最新编排 ${String(detail.orchestration.sha).slice(0, 8)} · ${detail.orchestration.message || '无描述'}`)
-                      : null),
+                        : null)),
                   selApp
                     ? h('div', { className: 'wh-toolbar', style: { gap: 6 } },
                         h('input', {
@@ -2362,11 +2351,29 @@ window.__ModuleLoader__.load({
                         h(Btn, { size: 'sm', disabled: noteBusy, onClick: saveNote },
                           noteBusy ? '保存中…' : '保存备注'))
                     : null,
+                  detail?.orchestration?.sha
+                    ? h('div', { className: 'wh-muted', style: { fontSize: 11 } }, `最新编排 ${String(detail.orchestration.sha).slice(0, 8)} · ${detail.orchestration.message || '无描述'}`)
+                    : null,
                   detail?.error
                     ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, `⚠ ${detail.error.message}`)
                     : !detail
                       ? h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '加载环境与部署单…')
-                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                          h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
+                            h('span', { style: { fontWeight: 550, fontSize: 12.5 } }, `环境 · ${(detail.envs ?? []).length}`),
+                            (detail.envs ?? []).length > 2
+                              ? h('select', {
+                                  className: 'wh-select', value: envFilter,
+                                  onChange: (e) => setEnvFilter(e.target.value),
+                                },
+                                  h('option', { value: '' }, '全部环境'),
+                                  (detail.envs ?? []).map((e) =>
+                                    h('option', { key: e.name, value: e.name }, `${e.displayName || e.name} (${e.name})`)))
+                              : null),
+                          (detail.envs ?? []).length === 1
+                            ? h('div', { className: 'wh-muted', style: { fontSize: 11 } },
+                                '该应用在云效 Appstack 只配置了这一个环境。开发/测试若不在此列表，说明应用未在 Appstack 建对应环境——这类部署多走流水线，可切到「流水线」Tab 运行。')
+                            : null,
                           shownEnvs.length
                             ? shownEnvs.map((e) =>
                               h('div', {

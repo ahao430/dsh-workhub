@@ -281,8 +281,10 @@ const MOCK = {
   '/api/workhub/actions/appstack/detail?': {
     app: 'demo-web',
     envs: [
-      { name: 'production', displayName: '生产环境', state: 'RUNNING', deployGroup: 'k8s-prod' },
-      { name: 'daily', displayName: '日常环境', state: 'DEPLOYING', deployGroup: 'k8s-daily' },
+      { name: 'prod', displayName: '生产环境', state: 'RUNNING', deployGroup: 'k8s-prod' },
+      { name: 'pre', displayName: '预发环境', state: 'RUNNING', deployGroup: 'k8s-pre' },
+      { name: 'test', displayName: '测试环境', state: 'DEPLOYING', deployGroup: 'k8s-test' },
+      { name: 'dev', displayName: '开发环境', state: 'ERROR', deployGroup: 'k8s-dev' },
     ],
     orders: [
       { name: '20261103174120-部署-workhub', type: 'Deploy', state: 'SUCCESS', version: '20261103174120-31', sn: '9d7b7635e65047129c3099b269117a1b', sha: 'f7c58c953f0a2019acdb7531ea4d2c70c36ab79', envName: 'production', artifacts: { 'image.backend': 'registry.cn-beijing/bsplatform/audit-console:1.0.5' }, createdAt: '2026-11-03T09:41:20.000Z' },
