@@ -253,7 +253,7 @@ react-is/cjs/react-is.production.js:
     /* GET 响应内存缓存：切页/预加载命中即秒开；动态端点（轮询/状态）不缓存。 */
     const apiCache = new Map()
     const API_TTL_MS = 90_000
-    const API_NO_CACHE = ['/actions/appstack/flow/status', '/update/check', '/dt/todos', '/dt/agenda', '/dt/approvals', '/depts']
+    const API_NO_CACHE = ['/actions/appstack/flow/status', '/update/check', '/dt/todos', '/dt/agenda', '/dt/approvals', '/depts', '/auth/']
     const apiCachePeek = (path) => apiCache.get(path)?.data ?? null
     const apiCacheClear = () => apiCache.clear()
 
@@ -271,8 +271,14 @@ react-is/cjs/react-is.production.js:
       })
       const body = await res.json()
       if (!res.ok || !body.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`)
+      /* 写操作成功后整体失效：避免「同步/生成/删除/采集后 90s 内仍读到旧缓存」 */
+      if (!isGet) apiCache.clear()
       if (cacheable) {
-        if (apiCache.size > 200) apiCache.clear()
+        if (apiCache.size > 200) {
+          // 淘汰最旧的一半（Map 按插入序），避免全清造成缓存雪崩
+          let drop = apiCache.size - 150
+          for (const k of apiCache.keys()) { apiCache.delete(k); if (--drop <= 0) break }
+        }
         apiCache.set(path, { at: Date.now(), data: body })
       }
       return body
@@ -327,12 +333,56 @@ react-is/cjs/react-is.production.js:
         }, `${t.tone === 'bad' ? '⚠' : t.tone === 'warn' ? '◐' : '✓'} ${t.text}`)))
     }
 
-    const AntdProvider = ({ children, mode = 'auto' }) => {
+    /* 二次确认弹层：与 Toasts 同模式订阅渲染（跟随深浅色主题，替代原生 window.confirm） */
+    let __confirmItem = null
+    const __confirmSubs = new Set()
+    const whConfirm = (title, content = '', { okText = '确认', danger = false } = {}) => new Promise((resolve) => {
+      const id = Date.now() + Math.random()
+      const settle = (v) => {
+        if (__confirmItem?.id === id) { __confirmItem = null; __confirmSubs.forEach((fn) => fn(null)) }
+        resolve(v)
+      }
+      __confirmItem = { id, title, content, okText, danger, onOk: () => settle(true), onCancel: () => settle(false) }
+      __confirmSubs.forEach((fn) => fn(__confirmItem))
+    })
+    function Confirms() {
+      const [item, setItem] = useState(__confirmItem)
+      useEffect(() => {
+        __confirmSubs.add(setItem)
+        return () => __confirmSubs.delete(setItem)
+      }, [])
+      useEffect(() => {
+        if (!item) return undefined
+        const onKey = (e) => { if (e.key === 'Escape') item.onCancel() }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [item])
+      if (!item) return null
+      return h('div', {
+        style: { position: 'fixed', inset: 0, zIndex: 1050, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 },
+        onClick: item.onCancel,
+      },
+        h('div', {
+          className: 'wh-card',
+          style: { width: 420, maxWidth: '100%', boxShadow: '0 16px 40px rgba(0,0,0,.24)' },
+          onClick: (e) => e.stopPropagation(),
+        },
+          h('div', { style: { fontWeight: 600, fontSize: 13.5, marginBottom: item.content ? 8 : 0 } }, item.title),
+          item.content
+            ? h('div', { style: { fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, item.content)
+            : null,
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 } },
+            h(Btn, { size: 'sm', onClick: item.onCancel }, '取消'),
+            h(Btn, { size: 'sm', variant: item.danger ? 'danger' : 'primary', onClick: item.onOk }, item.okText))))
+    }
+
+    const AntdProvider = ({ children }) => {
       const a = getAntd()
       const [sysDark, setSysDark] = useState(null)
-      // DSH 按时间自动切主题：检测「实际渲染背景色」（从面板向上找第一个非透明背景），比读 token 可靠
+      // 主题完全跟随 DSH（不提供手动覆盖，也不读系统偏好）：
+      // 检测「实际渲染背景色」（从面板向上找第一个非透明背景），比读 token / media-query 可靠
       useEffect(() => {
-        if (mode !== 'auto' || !a) return undefined
+        if (!a) return undefined
         const probe = () => {
           try {
             let el = document.querySelector('.wh-root')
@@ -351,17 +401,18 @@ react-is/cjs/react-is.production.js:
           } catch { /* 保持上次值 */ }
         }
         probe()
-        const timer = setInterval(probe, 2000)
+        // MutationObserver 即时响应主题/类名变化；轮询仅兜底（DSH 按时间自动切换），10s 足够
+        const timer = setInterval(probe, 10_000)
         const mo = new MutationObserver(probe)
         mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] })
         return () => { clearInterval(timer); mo.disconnect() }
-      }, [mode, a])
+      }, [a])
       // dark 状态写到根节点属性：自定义 CSS（Chip 状态色等）据此切换亮色变体
       useEffect(() => {
         try { document.querySelector('.wh-root')?.setAttribute('data-wh-dark', sysDark === true ? '1' : '0') } catch {}
       }, [sysDark])
       if (!a) return children
-      const dark = mode === 'dark' ? true : mode === 'light' ? false : (sysDark ?? false)
+      const dark = sysDark ?? false
       try {
         return h(a.ConfigProvider, {
           locale: a.zhCN?.default ?? a.zhCN,
@@ -426,16 +477,20 @@ react-is/cjs/react-is.production.js:
 
     const CSS = `
 .wh-root{display:flex;height:100%;font-size:13px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);
-  --wh-accent:var(--dsw-alias-state-business-primary,#2F6FEB);--wh-accent-soft:color-mix(in srgb,var(--wh-accent) 13%,transparent);
-  --wh-ok:var(--dsw-alias-state-success-primary,#1F9D68);--wh-ok-soft:var(--dsw-alias-state-success-secondary,rgba(31,157,104,.14));
-  --wh-warn:var(--dsw-alias-state-warn-primary,#B8770A);--wh-warn-soft:var(--dsw-alias-state-warn-secondary,rgba(184,119,10,.16));
-  --wh-bad:var(--dsw-alias-state-error-primary,#D9483B);--wh-bad-soft:var(--dsw-alias-state-error-secondary,rgba(217,72,59,.14))}
+  /* 强调/状态色用插件自有高对比色板（不取 DSH state token——部分 DSH 主题的
+     state-*-secondary 与 primary 同色，会导致状态 Chip 文字与背景一致不可读）。
+     soft 底一律为文字色的半透明淡染，任何主题下文字必然可读（浅色 ≥4:1，深色 ≥4:1）；
+     accent 与 AntdProvider 固定的 antd colorPrimary(#2F6FEB) 保持一致。 */
+  --wh-accent:#2F6FEB;--wh-accent-soft:color-mix(in srgb,var(--wh-accent) 10%,transparent);
+  --wh-ok:#157F56;--wh-ok-soft:color-mix(in srgb,var(--wh-ok) 14%,transparent);
+  --wh-warn:#9A6508;--wh-warn-soft:color-mix(in srgb,var(--wh-warn) 14%,transparent);
+  --wh-bad:#C8392C;--wh-bad-soft:color-mix(in srgb,var(--wh-bad) 14%,transparent)}
   /* 暗色：状态色切换亮色变体，保证 Chip/文字对比（data-wh-dark 由 AntdProvider 依据实际渲染背景写入） */
   .wh-root[data-wh-dark="1"]{
-    --wh-accent:#5B9BFF;--wh-accent-soft:rgba(91,155,255,.2);
-    --wh-ok:#3DD68C;--wh-ok-soft:rgba(61,214,140,.16);
-    --wh-warn:#F0B24A;--wh-warn-soft:rgba(240,178,74,.16);
-    --wh-bad:#FF7A6B;--wh-bad-soft:rgba(255,122,107,.16)}
+    --wh-accent:#5B9BFF;--wh-accent-soft:color-mix(in srgb,var(--wh-accent) 22%,transparent);
+    --wh-ok:#3DD68C;--wh-ok-soft:color-mix(in srgb,var(--wh-ok) 18%,transparent);
+    --wh-warn:#F0B24A;--wh-warn-soft:color-mix(in srgb,var(--wh-warn) 18%,transparent);
+    --wh-bad:#FF7A6B;--wh-bad-soft:color-mix(in srgb,var(--wh-bad) 18%,transparent)}
 .wh-root *{box-sizing:border-box}
 .wh-side{width:198px;flex:none;display:flex;flex-direction:column;padding:14px 10px 10px;gap:2px;
   background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l1);overflow-y:auto}
@@ -477,7 +532,7 @@ react-is/cjs/react-is.production.js:
 .wh-stat-hint{font-size:10.5px;color:var(--dsw-alias-label-secondary)}
 .wh-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;
   font-size:11px;line-height:1.6;font-weight:500;white-space:nowrap;border:1px solid transparent}
-.wh-chip.neutral{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
+.wh-chip.neutral{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);opacity:.85}
 .wh-chip.brand{background:var(--wh-accent-soft);color:var(--wh-accent)}
 .wh-chip.ok{background:var(--wh-ok-soft);color:var(--wh-ok)}
 .wh-chip.warn{background:var(--wh-warn-soft);color:var(--wh-warn)}
@@ -703,7 +758,9 @@ react-is/cjs/react-is.production.js:
         h('span', {
           style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
           title: r.title ?? '',
-        }, (r.title ?? '').replace(new RegExp(`^${r.source_id}\\s*`), '') || r.title || '(无标题)'),
+        }, (r.title && r.source_id && r.title.startsWith(r.source_id)
+          ? r.title.slice(r.source_id.length).trimStart()
+          : r.title) || '(无标题)'),
         h(Chip, { tone: 'warn', style: { flex: 'none' } }, r.status || '进行中'),
         showDate && r.day ? h('span', { className: 'wh-muted', style: { flex: 'none', fontSize: 11 } }, String(r.day).slice(5)) : null)
     }
@@ -724,12 +781,12 @@ react-is/cjs/react-is.production.js:
       return h(Chip, { tone }, `${value > 0 ? '+' : ''}${value}${suffix}`)
     }
 
-    function BarRow({ name, value, max, color }) {
+    function BarRow({ name, value, max, color, suffix = '' }) {
       return h('div', { className: 'wh-bar-row' },
         h('span', { className: 'wh-bar-name', title: name }, name),
         h('div', { className: 'wh-bar-track' },
           h('div', { className: 'wh-bar-fill', style: { width: `${Math.max(2, (value / max) * 100)}%`, background: color } })),
-        h('span', { className: 'wh-bar-val' }, value))
+        h('span', { className: 'wh-bar-val' }, `${value}${suffix}`))
     }
 
     function Legend({ types }) {
@@ -937,7 +994,6 @@ react-is/cjs/react-is.production.js:
             key: t,
             label: typeLabel(t),
             value: stats.counts[t],
-            hint: cmp ? null : null,
             accent: typeColor(t),
           })),
       ]
@@ -1111,7 +1167,7 @@ react-is/cjs/react-is.production.js:
       }
 
       const start = async () => {
-        if (!window.confirm('将打开浏览器进行钉钉授权（OAuth Loopback）。\n\n授权完成后会自动回到本页，无需终端操作。继续？')) return
+        if (!(await whConfirm('打开浏览器进行钉钉授权？', '授权完成后会自动回到本页，无需终端操作。', { okText: '继续' }))) return
         setBusy(true); setMsg(null); setJob(null)
         try {
           const r = await api('/auth/dingtalk/login', { method: 'POST', body: '{}' })
@@ -1240,9 +1296,7 @@ react-is/cjs/react-is.production.js:
     const SYNC_TONE = { ok: 'ok', syncing: 'warn', error: 'bad', partial: 'warn' }
     const SYNC_LABEL = { ok: '正常', syncing: '同步中', error: '错误', partial: '部分' }
 
-    function DataManager(props) {
-      const themeMode = props?.themeMode ?? 'auto'
-      const saveThemeMode = props?.saveThemeMode
+    function DataManager() {
       const [status, setStatus] = useState(null)
       const [busy, setBusy] = useState('')
       const [msg, setMsg] = useState(null)
@@ -1482,7 +1536,9 @@ react-is/cjs/react-is.production.js:
         if (!targets.length) { setMsg('没有可采集的会话（先同步 dws.chats）'); return }
         setBusy('batch'); setMsg(null)
         const done = []
-        for (const c of targets) {
+        for (let i = 0; i < targets.length; i++) {
+          const c = targets[i]
+          setMsg(`批量采集中 ${i + 1}/${targets.length} — ${c.name || c.conversation_id.slice(0, 12)}`)
           try {
             const r = await api('/chats/collect', { method: 'POST', body: JSON.stringify({ conversationId: c.conversation_id, sinceDays: 14 }) })
             done.push(`${c.name || c.conversation_id.slice(0, 12)}: ${r.result.upserted}`)
@@ -1771,14 +1827,6 @@ react-is/cjs/react-is.production.js:
                       o.at ? new Date(o.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : ''))))
             : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '暂无操作记录')),
         h(Card, {
-          title: '界面主题',
-          sub: '跟随 DSH（按时间自动切换深浅色）· 也可手动指定',
-        },
-          h('div', { className: 'wh-toolbar', style: { gap: 6 } },
-            [['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']].map(([m, label]) =>
-              h(Btn, { key: m, size: 'sm', variant: themeMode === m ? 'primary' : 'ghost', onClick: () => saveThemeMode?.(m) }, label))),
-          h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 6 } }, '覆盖仅影响本插件的表单与按钮配色，跟随系统时随 DSH 主题自动切换')),
-        h(Card, {
           title: '同步状态',
           sub: `${(status?.sources ?? []).length || 12} 个数据源 · 定时每 30 分钟增量同步`,
           action: h(Btn, { variant: 'primary', disabled: !!busy, onClick: () => run('all') },
@@ -1956,7 +2004,7 @@ react-is/cjs/react-is.production.js:
         } catch (e) { setMsg(`归集失败: ${e.message}`) }
       }
       const del = async (id, name) => {
-        if (!window.confirm(`删除项目「${name}」？相关归集链接会一并清除。`)) return
+        if (!(await whConfirm(`删除项目「${name}」？`, '相关归集链接会一并清除。', { danger: true, okText: '删除' }))) return
         setMsg(null)
         try {
           await api('/projects/delete', { method: 'POST', body: JSON.stringify({ id }) })
@@ -2267,7 +2315,10 @@ react-is/cjs/react-is.production.js:
           navigator.clipboard.writeText(prompt).then(() => {
             setCopied(true)
             setTimeout(() => setCopied(false), 2000)
-          }).catch(() => {})
+            toast('已复制 AI 提示词，到 DSH 对话粘贴发送即可')
+          }).catch(() => toast('复制失败，请手动复制提示词', 'bad'))
+        } else {
+          toast('当前环境不支持剪贴板，请在对话中直接引用工具名', 'warn')
         }
       }
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
@@ -2636,13 +2687,14 @@ react-is/cjs/react-is.production.js:
       const [projectFilter, setProjectFilter] = useState('')
       const [view, setView] = useState('month')
       const [extraDays, setExtraDays] = useState({})
+      const [retryKey, setRetryKey] = useState(0)
       useEffect(() => { api('/projects').then((r) => setProjects(r.projects)).catch(() => {}) }, [])
       useEffect(() => {
         const q = new URLSearchParams({ month })
         if (projectFilter) q.set('projectId', projectFilter)
         setCalErr(null)
         api(`/calendar?${q}`).then((r) => { setData(r); setCalErr(null) }).catch((e) => { setData(null); setCalErr(String(e.message)) })
-      }, [month, projectFilter, refreshKey])
+      }, [month, projectFilter, refreshKey, retryKey])
       // 钉钉日程标记单独加载（不阻塞日历主体），到达后合并
       useEffect(() => {
         let alive = true
@@ -2736,7 +2788,7 @@ react-is/cjs/react-is.production.js:
           ? h(Card, { title: '日历数据加载失败', sub: month },
               h('div', { className: 'wh-toolbar', style: { gap: 8 } },
                 h('span', { style: { fontSize: 12, color: 'var(--wh-bad)' } }, calErr),
-                h(Btn, { size: 'sm', onClick: () => { setData(null); setCalErr(null); setMonth((m) => m) } }, '重试')))
+                h(Btn, { size: 'sm', onClick: () => { setData(null); setCalErr(null); setRetryKey((k) => k + 1) } }, '重试')))
           : data === null
             ? h('div', { className: 'wh-muted', style: { padding: '18px 0', fontSize: 12 } }, '日历数据加载中…')
             : view === 'month'
@@ -2791,7 +2843,7 @@ react-is/cjs/react-is.production.js:
       }
 
       const delReport = async (id, title) => {
-        if (!window.confirm(`删除报告草稿「${title}」？`)) return
+        if (!(await whConfirm(`删除报告草稿「${title}」？`, '', { danger: true, okText: '删除' }))) return
         try {
           await api('/analyses/delete', { method: 'POST', body: JSON.stringify({ id }) })
           setMsg('已删除报告草稿')
@@ -2799,7 +2851,7 @@ react-is/cjs/react-is.production.js:
         } catch (e) { setMsg(`删除失败: ${e.message}`) }
       }
       const delSummary = async (date) => {
-        if (!window.confirm(`删除 ${date} 的每日总结？（可从日历重新生成）`)) return
+        if (!(await whConfirm(`删除 ${date} 的每日总结？`, '删除后可从日历重新生成。', { danger: true, okText: '删除' }))) return
         try {
           await api('/summaries/delete', { method: 'POST', body: JSON.stringify({ date }) })
           setMsg(`已删除 ${date} 的每日总结`)
@@ -2932,7 +2984,7 @@ react-is/cjs/react-is.production.js:
       }
 
       const del = async (id) => {
-        if (!window.confirm('删除这份会话小结？')) return
+        if (!(await whConfirm('删除这份会话小结？', '', { danger: true, okText: '删除' }))) return
         try {
           await api('/analyses/delete', { method: 'POST', body: JSON.stringify({ id }) })
           load()
@@ -3065,6 +3117,7 @@ react-is/cjs/react-is.production.js:
                           value: Math.round((n / input.stats.total) * 100),
                           max: 100,
                           color: 'var(--wh-accent)',
+                          suffix: '%',
                         })))
                   : h(Empty, { icon: '◇', title: '暂无发言统计', hint: '采集会话后显示' })),
               h(Card, { title: '最近消息', sub: '前 20 条 · 用于人工核对' },
@@ -3107,9 +3160,14 @@ react-is/cjs/react-is.production.js:
         return lines.join('\n')
       }
       return h('div', { className: 'wh-content' },
+        data.identityConfigured === false
+          ? h(Card, null, h('div', { style: { fontSize: 12.5 } },
+              '未配置「我的身份」：当前统计包含全部采集数据（含他人的提交 / 需求 / 群消息）。',
+              h('span', { className: 'wh-muted' }, ' 到「数据管理 → 我的身份」填入你的钉钉名与 git 署名后，这里只统计你自己的活动。')))
+          : null,
         h(Card, {
           title: '工作时间热力图',
-          sub: `${data.range.startDate} ~ ${data.range.endDate} · 活动代理指标，非实际工时`,
+          sub: `${data.range.startDate} ~ ${data.range.endDate} · 我的活动${data.identityConfigured === false ? '（未按身份过滤）' : ''}，非实际工时`,
         },
           h(Heatmap, { matrix: data.matrix })),
         h(Card, { title: '时段分布', sub: '按小时聚合 · 悬浮查看需求提交与聊天内容' },
@@ -3143,45 +3201,52 @@ react-is/cjs/react-is.production.js:
     /* 快捷执行页内存缓存：切页不丢状态，回页秒显再后台刷新 */
     const actionsMem = { data: null, appsData: null, selApp: '', detail: {} }
 
-    /* 今日待处理（钉钉整合卡）：今日日程 + 到期待办 + 待我审批；与日历/驾驶舱复用 */
-    const dtMem = { agenda: null, todos: null, approvals: null, at: 0 }
+    /* 今日待处理（钉钉整合卡）：今日日程 + 到期待办 + 待我审批；
+     * 同日期 60s 内读缓存（驾驶舱/日历多处挂载共用，/dt/* 每次 3 个 dws 子进程，很贵），
+     * 面板内完成/审批后 force 刷新。 */
+    const dtMem = { date: null, data: null, at: 0 }
+    const dtMemFresh = (date) => dtMem.date === date && dtMem.data && Date.now() - dtMem.at < 60_000
     const isoDay = (ts) => { const d = new Date(Number(ts)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
-    function loadDingTalkToday(date) {
+    function loadDingTalkToday(date, { force = false } = {}) {
       const target = date ?? isoDay(Date.now())
+      if (!force && dtMemFresh(target)) return Promise.resolve(dtMem.data)
       return Promise.all([
         api(`/dt/agenda?start=${encodeURIComponent(`${target}T00:00:00+08:00`)}&end=${encodeURIComponent(`${target}T23:59:00+08:00`)}`).then((r) => r.events ?? []).catch(() => []),
         api('/dt/todos?scope=my').then((r) => (r.todos ?? []).filter((t) => !t.done && t.dueTime && isoDay(t.dueTime) === target)).catch(() => []),
         api('/dt/approvals?scope=pending').then((r) => r.approvals ?? []).catch(() => []),
       ]).then(([events, todos, approvals]) => {
-        dtMem.agenda = events; dtMem.todos = todos; dtMem.approvals = approvals; dtMem.at = Date.now()
-        return { events, todos, approvals }
+        const data = { events, todos, approvals }
+        dtMem.date = target; dtMem.data = data; dtMem.at = Date.now()
+        return data
       })
     }
     function DingTalkToday({ date }) {
       const [data, setData] = useState(null)
       const [busy, setBusy] = useState('')
-      const load = useCallback(() => {
+      const load = useCallback((force) => {
+        // 缓存命中直接同步展示，避免每次挂载都闪「加载中」
+        if (!force && dtMemFresh(date)) { setData(dtMem.data); return }
         setData(null)
         loadDingTalkToday(date).then(setData).catch(() => setData({ events: [], todos: [], approvals: [] }))
       }, [date])
       useEffect(() => { load() }, [load])
       const completeTodo = async (t) => {
-        if (!window.confirm(`完成待办？\n\n${t.subject}`)) return
+        if (!(await whConfirm('完成待办？', t.subject ?? '', { okText: '完成' }))) return
         setBusy(`c:${t.taskId}`)
         try {
           await api('/dt/todo/complete', { method: 'POST', body: JSON.stringify({ taskId: t.taskId }) })
           toast(`待办「${t.subject.slice(0, 20)}」已完成`)
-          load()
+          load(true)
         } catch (e) { toast(`完成失败: ${e.message}`, 'bad') } finally { setBusy('') }
       }
       const actApproval = async (a, action) => {
         const verb = action === 'approve' ? '同意' : '拒绝'
-        if (!window.confirm(`${verb}该审批？\n\n${a.title}\n发起人：${a.originator || '—'}`)) return
+        if (!(await whConfirm(`${verb}该审批？`, `${a.title}\n发起人：${a.originator || '—'}`, { danger: action === 'reject', okText: verb }))) return
         setBusy(`a:${a.taskId || a.instanceId}`)
         try {
           await api('/dt/approval/action', { method: 'POST', body: JSON.stringify({ instanceId: a.instanceId, taskId: a.taskId, action, userConfirmed: true }) })
           toast(`已${verb}审批「${a.title.slice(0, 20)}」`)
-          load()
+          load(true)
         } catch (e) { toast(`${verb}失败: ${e.message}`, 'bad') } finally { setBusy('') }
       }
       if (!data) return h('div', { className: 'wh-muted', style: { fontSize: 12, padding: '6px 0' } }, '加载今日日程与待办…')
@@ -3356,7 +3421,7 @@ react-is/cjs/react-is.production.js:
       }
 
       const run = async (pipelineId, name) => {
-        if (!window.confirm(`确认运行流水线？\n\n${name}（id: ${pipelineId}）\n\n该操作将真实触发云效流水线执行。`)) return
+        if (!(await whConfirm('确认运行流水线？', `${name}（id: ${pipelineId}）\n\n该操作将真实触发云效流水线执行。`, { danger: true, okText: '运行' }))) return
         setBusy(pipelineId); setMsg(null)
         try {
           const r = await api('/actions/pipelines/run', { method: 'POST', body: JSON.stringify({ pipelineId }) })
@@ -3369,7 +3434,7 @@ react-is/cjs/react-is.production.js:
         if (!selApp) return
         const envLabel = (detail?.envs ?? []).find((e) => e.name === o.envName)?.displayName ?? o.envName ?? ''
         const arts = Object.entries(o.artifacts ?? {}).map(([k, v]) => `  ${k} = ${v}`).join('\n')
-        if (!window.confirm(`确认回滚？\n\n应用：${selApp}\n环境：${envLabel}\n目标版本：${o.version || o.name}\n制品：\n${arts}\n\n将按该部署单的制品重新创建部署单（真实发布）。`)) return
+        if (!(await whConfirm('确认回滚？', `应用：${selApp}\n环境：${envLabel}\n目标版本：${o.version || o.name}\n制品：\n${arts}\n\n将按该部署单的制品重新创建部署单（真实发布）。`, { danger: true, okText: '回滚' }))) return
         setBusy(`rb:${o.sn}`); setMsg(null)
         try {
           const r = await api('/actions/appstack/rollback', { method: 'POST', body: JSON.stringify({ appName: selApp, envName: o.envName, sn: o.sn, userConfirmed: true }) })
@@ -3401,7 +3466,7 @@ react-is/cjs/react-is.production.js:
       const deploy = async (envName) => {
         if (!selApp) return
         const envLabel = (detail?.envs ?? []).find((e) => e.name === envName)?.displayName ?? envName
-        if (!window.confirm(`确认部署应用？\n\n应用：${selApp}\n环境：${envLabel}\n\n将使用最新编排版本创建部署单（真实发布）。`)) return
+        if (!(await whConfirm('确认部署应用？', `应用：${selApp}\n环境：${envLabel}\n\n将使用最新编排版本创建部署单（真实发布）。`, { danger: true, okText: '部署' }))) return
         setBusy(`deploy:${envName}`); setMsg(null)
         try {
           const r = await api('/actions/appstack/deploy', { method: 'POST', body: JSON.stringify({ appName: selApp, envName, userConfirmed: true }) })
@@ -3413,7 +3478,7 @@ react-is/cjs/react-is.production.js:
 
       const pipelines = data?.pipelines ?? []
       const actions = data?.actions ?? []
-      const [actTab, setActTab] = useState(initialTab)
+      const [actTab, setActTab] = useState(actionsMem.tab ?? initialTab)
 
       const flowCard = h(Card, { title: '云效流水线', sub: `${pipelines.length} 条 · 运行需二次确认` },
         pipelines.length
@@ -3577,7 +3642,7 @@ react-is/cjs/react-is.production.js:
         h(Tabs, {
           tabs: [['flow', `流水线 · ${pipelines.length}`], ['appstack', `应用交付 · ${appsData?.apps?.length ?? 0}`]],
           active: actTab,
-          onChange: setActTab,
+          onChange: (id) => { actionsMem.tab = id; setActTab(id) },
         }),
         actTab === 'flow' ? flowCard : null,
         actTab === 'appstack' ? appstackCard : null,
@@ -3666,19 +3731,11 @@ react-is/cjs/react-is.production.js:
       const [scope, setScope] = useState(viewMem.groupId)
       const [pal, setPal] = useState(null) // null | { q, idx }
       const [refreshKey, setRefreshKey] = useState(0)
-      const [themeMode, setThemeMode] = useState('auto')
       useEffect(() => { void api('/groups').then((r) => setGroups(r.groups ?? [])).catch(() => {}) }, [])
       // 应用列表拉一次（服务端 5 分钟缓存），喂给命令面板 + 预热快捷执行页
       useEffect(() => {
         if (!actionsMem.appsData) void api('/actions/appstack').then((r) => { actionsMem.appsData = r }).catch(() => {})
       }, [])
-      // 打开插件即预热常用页面数据：切菜单不出现空白（api 缓存命中后即时渲染）
-      useEffect(() => { void api('/ui/theme').then((r) => setThemeMode(r.mode ?? 'auto')).catch(() => {}) }, [])
-      const saveThemeMode = async (mode) => {
-        setThemeMode(mode)
-        try { await api('/ui/theme', { method: 'POST', body: JSON.stringify({ mode }) }) } catch { /* 本地生效即可 */ }
-        toast(mode === 'auto' ? '主题跟随 DSH（按时间自动切换）' : mode === 'dark' ? '已切换深色界面' : '已切换浅色界面')
-      }
       useEffect(() => {
         const month = new Date().toISOString().slice(0, 7)
         const warm = [
@@ -3712,9 +3769,9 @@ react-is/cjs/react-is.production.js:
         actionsMem.detail = {}
         updateMem.data = null
         updateMem.at = 0
-        dtMem.agenda = null
-        dtMem.todos = null
-        dtMem.approvals = null
+        dtMem.date = null
+        dtMem.data = null
+        dtMem.at = 0
         setRefreshKey((k) => k + 1)
         toast('已刷新全部数据')
       }
@@ -3836,9 +3893,7 @@ react-is/cjs/react-is.production.js:
           ? { range }
           : current[0] === 'calendar'
             ? { refreshKey }
-            : current[0] === 'data'
-              ? { themeMode, saveThemeMode }
-              : null
+            : null
       const body = h(ErrorBoundary, { name: current[1], key: `${current[0]}:${refreshKey}` },
         h(current[2], pageProps))
 
@@ -3873,6 +3928,7 @@ react-is/cjs/react-is.production.js:
                       h('button', {
                         key: `${item.kind}:${item.id}`,
                         onClick: () => palPick(item),
+                        onMouseEnter: () => setPal((p0) => (p0 && p0.idx !== i ? { ...p0, idx: i } : p0)),
                         style: {
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
                           padding: '8px 14px', border: 'none', cursor: 'pointer', textAlign: 'left',
@@ -3884,7 +3940,7 @@ react-is/cjs/react-is.production.js:
                         h('span', { className: 'wh-muted', style: { fontSize: 11 } }, item.sub ?? '')))
                   : h('div', { className: 'wh-muted', style: { padding: '14px', fontSize: 12 } }, '无匹配结果'))))
             : null
-      return h(AntdProvider, { mode: themeMode }, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts), palette))
+      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts), h(Confirms), palette))
     }
 
     /* 更新提示横幅：只检测并提示，不做页面内自动更新（升级+重载由 DSH 助手或用户手动完成） */
