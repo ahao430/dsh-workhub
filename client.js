@@ -307,7 +307,8 @@ react-is/cjs/react-is.production.js:
         onKeyDown: (e) => { if (e.key === 'Enter') onEnter?.(e) },
       })
     }
-    /* 下拉：antd onChange(value) 归一为 e.target.value；options 统一 [{value,label}] */
+    /* 下拉：antd onChange(value) 归一为 e.target.value；options 统一 [{value,label}]。
+     * 选项 ≥8 个自动开启搜索（应用 200 个、会话、部门成员等动态长列表），短列表保持普通下拉。 */
     const WhSelect = ({ options = [], value, onChange, style, ...rest }) => {
       const a = getAntd()
       if (a) {
@@ -315,8 +316,9 @@ react-is/cjs/react-is.production.js:
           size: 'small', style: { minWidth: 110, ...style },
           value: value ?? '', options,
           onChange: (v) => onChange?.({ target: { value: v } }),
-          showSearch: rest.showSearch, optionFilterProp: 'label',
+          showSearch: rest.showSearch ?? options.length >= 8, optionFilterProp: 'label',
           allowClear: rest.allowClear, placeholder: rest.placeholder,
+          popupMatchSelectWidth: false,
         })
       }
       return h('select', { className: 'wh-select', value, style, onChange: (e) => onChange?.(e) },
