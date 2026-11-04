@@ -279,6 +279,37 @@ react-is/cjs/react-is.production.js:
       }
       return __antdMemo
     }
+    /* 轻量 toast：右上角堆叠，3.8s 自动消失；错误仍走页顶 msg 卡片 */
+    let __toastList = []
+    const __toastSubs = new Set()
+    const toast = (text, tone = 'ok') => {
+      const t = { id: Date.now() + Math.random(), text, tone }
+      __toastList = [...__toastList, t].slice(-4)
+      __toastSubs.forEach((fn) => fn(__toastList))
+      setTimeout(() => {
+        __toastList = __toastList.filter((x) => x.id !== t.id)
+        __toastSubs.forEach((fn) => fn(__toastList))
+      }, 3800)
+    }
+    function Toasts() {
+      const [list, setList] = useState(__toastList)
+      useEffect(() => {
+        __toastSubs.add(setList)
+        return () => __toastSubs.delete(setList)
+      }, [])
+      if (!list.length) return null
+      return h('div', { style: { position: 'fixed', top: 14, right: 16, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 } },
+        list.map((t) => h('div', {
+          key: t.id,
+          className: 'wh-card',
+          style: {
+            padding: '9px 14px', fontSize: 12.5, maxWidth: 420,
+            border: `1px solid ${t.tone === 'bad' ? 'var(--wh-bad)' : t.tone === 'warn' ? 'var(--wh-warn)' : 'var(--wh-ok)'}`,
+            boxShadow: '0 8px 24px rgba(0,0,0,.16)',
+          },
+        }, `${t.tone === 'bad' ? '⚠' : t.tone === 'warn' ? '◐' : '✓'} ${t.text}`)))
+    }
+
     const AntdProvider = ({ children }) => {
       const a = getAntd()
       if (!a) return children
@@ -1203,7 +1234,7 @@ react-is/cjs/react-is.production.js:
           await api('/groups', { method: 'POST', body: JSON.stringify({ groups: next }) })
           await refreshGroups()
           setMarkFor(''); setMarkGroup(''); setMarkMember('')
-          setMsg(`已把署名「${markFor}」标记为 ${markMember} 的别名`)
+          toast(`署名「${markFor}」已标记为 ${markMember} 的别名`)
         } catch (e) { setMsg(`标记失败: ${e.message}`) }
       }
 
@@ -1236,7 +1267,7 @@ react-is/cjs/react-is.production.js:
         try {
           const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: (groups ?? []).filter((g) => g.id !== id) }) })
           setGroups(r.groups ?? [])
-          setMsg('已删除部门')
+          toast('已删除部门')
         } catch (e) { setMsg(`删除失败: ${e.message}`) } finally { setGBusy(false) }
       }
 
@@ -1278,7 +1309,7 @@ react-is/cjs/react-is.production.js:
           const cur = (groups ?? []).filter((g) => g.name !== name)
           const r = await api('/groups', { method: 'POST', body: JSON.stringify({ groups: [...cur, { name, members: browse.members }] }) })
           setGroups(r.groups ?? [])
-          setMsg(`已${(groups ?? []).some((g) => g.name === name) ? '同步' : '添加'}部门「${name}」（${browse.members.length} 人）。成员别名可在下方编辑`)
+          toast(`已${(groups ?? []).some((g) => g.name === name) ? '同步' : '添加'}部门「${name}」（${browse.members.length} 人）`)
           setBrowse(null)
         } catch (e) { setMsg(`添加失败: ${e.message}`); setBrowse((b0) => ({ ...(b0 ?? {}), busy: false })) }
       }
@@ -1296,7 +1327,7 @@ react-is/cjs/react-is.production.js:
           const r = await api('/identity', { method: 'POST', body: JSON.stringify({ actors }) })
           setIdentity((p0) => ({ ...(p0 ?? {}), actors: r.actors }))
           setIdDraft(r.actors.join(', '))
-          setMsg('已保存我的身份，进行中需求将只显示与你相关的')
+          toast('已保存我的身份，进行中需求只看与你相关')
         } catch (e) { setMsg(`身份保存失败: ${e.message}`) } finally { setIdBusy(false) }
       }
 
@@ -2888,18 +2919,50 @@ react-is/cjs/react-is.production.js:
     /* 快捷执行页内存缓存：切页不丢状态，回页秒显再后台刷新 */
     const actionsMem = { data: null, appsData: null, selApp: '', detail: {} }
 
-    /* 研发流程阶段行：展开运行表单（分支 / 运行变量 / 备注） */
-    function FlowStageRow({ app, wf, st, busy, onRun }) {
+    /* 研发流程阶段行：展开运行表单（分支 / 运行变量 / 备注）+ 最近运行状态与轮询 */
+    function FlowStageRow({ app, wf, st, busy, onRun, lastPref }) {
       const [open, setOpen] = useState(false)
-      const [branch, setBranch] = useState(st.branch ?? 'master')
-      const [vars, setVars] = useState(() => Object.entries(st.params ?? {}).map(([k, v]) => ({ k, v })))
-      const [comment, setComment] = useState('')
+      const [branch, setBranch] = useState(lastPref?.branch ?? st.branch ?? 'master')
+      const [vars, setVars] = useState(() => Object.entries(lastPref?.params ?? st.params ?? {}).map(([k, v]) => ({ k, v })))
+      const [comment, setComment] = useState(lastPref?.comment ?? '')
+      const [run, setRun] = useState(null)
       const running = busy === `flow:${st.sn}`
+      const statusChip = run
+        ? h(Chip, { tone: run.status === 'SUCCESS' ? 'ok' : run.status === 'FAILURE' || run.status === 'FAILED' || run.status === 'CANCELED' ? 'bad' : 'brand', title: `#${run.runId ?? ''}` },
+            run.status === 'SUCCESS' ? `#${run.runId} 成功` : run.status === 'RUNNING' ? `#${run.runId} 运行中` : `#${run.runId} ${run.status}`)
+        : null
+      const fetchStatus = useCallback(() => {
+        if (!st.pipelineId) return
+        void api(`/actions/appstack/flow/status?pipelineId=${encodeURIComponent(st.pipelineId)}`)
+          .then((r) => setRun(r.latest))
+          .catch(() => {})
+      }, [st.pipelineId])
+      useEffect(() => { fetchStatus() }, [fetchStatus])
+      // 运行触发后轮询：每 12s 一次，最长 8 分钟；结束时 toast + 刷新详情
+      useEffect(() => {
+        if (!run || run.status !== 'RUNNING') return undefined
+        const started = Date.now()
+        const timer = setInterval(() => {
+          if (Date.now() - started > 8 * 60_000) { clearInterval(timer); return }
+          void api(`/actions/appstack/flow/status?pipelineId=${encodeURIComponent(st.pipelineId)}`)
+            .then((r) => {
+              if (r.latest && r.latest.status !== 'RUNNING') {
+                clearInterval(timer)
+                setRun(r.latest)
+                if (r.latest.status === 'SUCCESS') toast(`「${wf.name} · ${st.name}」运行成功（#${r.latest.runId}）`)
+                else toast(`「${wf.name} · ${st.name}」运行结束：${r.latest.status}（#${r.latest.runId}）`, 'bad')
+              }
+            })
+            .catch(() => {})
+        }, 12_000)
+        return () => clearInterval(timer)
+      }, [run?.status, st.pipelineId, wf.name, st.name])
       return h('div', { style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: '6px 10px', flex: '1 1 240px', minWidth: 240 } },
         h('div', { className: 'wh-toolbar', style: { justifyContent: 'space-between' } },
           h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
             h('span', { style: { fontWeight: 550, fontSize: 12.5 } }, st.name),
-            st.envType ? h(Chip, { tone: st.envType.includes('生产') ? 'bad' : st.envType.includes('预发') ? 'warn' : 'ok' }, st.envType) : null),
+            st.envType ? h(Chip, { tone: st.envType.includes('生产') ? 'bad' : st.envType.includes('预发') ? 'warn' : 'ok' }, st.envType) : null,
+            statusChip),
           h(Btn, { size: 'sm', variant: open ? 'ghost' : 'primary', disabled: running, onClick: () => setOpen(!open) },
             running ? '提交中…' : open ? '收起' : '运行')),
         open
@@ -2916,7 +2979,10 @@ react-is/cjs/react-is.production.js:
               h('div', { className: 'wh-toolbar', style: { gap: 6 } },
                 h(Btn, {
                   size: 'sm', variant: 'primary', disabled: running,
-                  onClick: () => onRun(wf, st, { branch, comment, params: Object.fromEntries(vars.map((r) => [r.k, r.v])) }),
+                  onClick: async () => {
+                    const ok = await onRun(wf, st, { branch, comment, params: Object.fromEntries(vars.map((r) => [r.k, r.v])) })
+                    if (ok) { setOpen(false); fetchStatus() }
+                  },
                 }, '确认运行'),
                 h(Btn, { size: 'sm', onClick: () => setOpen(false) }, '取消')))
           : null)
@@ -3012,23 +3078,29 @@ react-is/cjs/react-is.production.js:
         setBusy(`rb:${o.sn}`); setMsg(null)
         try {
           const r = await api('/actions/appstack/rollback', { method: 'POST', body: JSON.stringify({ appName: selApp, envName: o.envName, sn: o.sn, userConfirmed: true }) })
-          setMsg(`已创建回滚部署单「${r.order?.name ?? ''}」→ 目标 ${r.toVersion || o.version || o.name}`)
+          toast(`已创建回滚部署单 → 目标 ${r.toVersion || o.version || o.name}`)
           void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
           load()
         } catch (e) { setMsg(`回滚失败: ${e.message}`) } finally { setBusy('') }
       }
 
       const runFlowStage = async (wf, st, { branch, comment, params }) => {
-        if (!selApp) return
+        if (!selApp) return false
         setBusy(`flow:${st.sn}`); setMsg(null)
         try {
           await api('/actions/appstack/flow/run', {
             method: 'POST',
             body: JSON.stringify({ app: selApp, workflowSn: wf.sn, stageSn: st.sn, branch, sourceLabel: st.sourceLabel, comment, params, userConfirmed: true }),
           })
-          setMsg(`研发流程「${wf.name} · ${st.name}」已触发${branch ? `（分支 ${branch}）` : ''}，可在云效流水线查看进度`)
+          // 记住本次运行配置（分支/变量/备注），下次展开默认带出
+          const key = `${selApp}/${st.sn}`
+          const cur = (prefs?.flowLast ?? {})
+          void api('/actions/appstack/prefs', { method: 'POST', body: JSON.stringify({ flowLast: { [key]: { branch, params, comment } } }) })
+            .then((r) => setPrefs((p0) => ({ ...(p0 ?? {}), flowLast: r.flowLast ?? cur }))).catch(() => {})
+          toast(`「${wf.name} · ${st.name}」已触发运行${branch ? `（分支 ${branch}）` : ''}`)
           void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
-        } catch (e) { setMsg(`运行失败: ${e.message}`) } finally { setBusy('') }
+          return true
+        } catch (e) { setMsg(`运行失败: ${e.message}`); return false } finally { setBusy('') }
       }
 
       const deploy = async (envName) => {
@@ -3176,7 +3248,7 @@ react-is/cjs/react-is.production.js:
                                   h('div', { key: wf.sn, style: { display: 'flex', flexDirection: 'column', gap: 5 } },
                                     h('div', { className: 'wh-muted', style: { fontSize: 11 } }, wf.name),
                                     h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-                                      wf.stages.map((st) => h(FlowStageRow, { key: st.sn, app: detail.app, wf, st, busy, onRun: runFlowStage })))))
+                                      wf.stages.map((st) => h(FlowStageRow, { key: st.sn, app: detail.app, wf, st, busy, onRun: runFlowStage, lastPref: prefs?.flowLast?.[`${detail.app}/${st.sn}`] })))))
                                 )
                             : null,
                           (detail.orders ?? []).length
@@ -3381,7 +3453,7 @@ react-is/cjs/react-is.production.js:
         header,
         h('div', { className: 'wh-scroll' }, h(UpdateBanner), body))
 
-      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main))
+      return h(AntdProvider, null, h('div', { className: 'wh-root' }, styleTag(), sidebar, main, h(Toasts)))
     }
 
     /* 更新提示横幅：只检测并提示，不做页面内自动更新（升级+重载由 DSH 助手或用户手动完成） */
