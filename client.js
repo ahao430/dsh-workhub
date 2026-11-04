@@ -1618,9 +1618,11 @@ window.__ModuleLoader__.load({
               d.checkIn ? `打卡 ${d.checkIn}–${d.checkOut ?? '未打卡下班'}` : '无打卡记录',
               hasWl ? `报工 ${d.worklogHours}h` : null,
               `${workEvents} 工作事件${chats ? ` + ${chats} 消息` : ''}`,
+              d.topReqs?.length ? `需求提交：${d.topReqs.map((r) => `${r.serial}×${r.count}`).join(' · ')}` : null,
+              d.topReqs?.[0]?.title ? `最新：${d.topReqs[0].title}` : null,
               d.milestoneCount ? `排期节点 ${d.milestoneCount}` : null,
               d.hasSummary ? '已有 AI 总结' : null,
-            ].filter(Boolean).join(' · ')
+            ].filter(Boolean).join('\n')
           : date,
       },
         h('div', { className: 'wh-cal-top' },
@@ -2064,19 +2066,32 @@ window.__ModuleLoader__.load({
       if (!data) return h(Loading)
       const maxHour = Math.max(1, ...data.hourHistogram)
       const actorMax = Math.max(1, ...data.topActors.map((a) => a.n))
+      const hourTip = (hour, n) => {
+        const lines = [`${hour}:00 — ${n} 事件`]
+        const d = data.hourDetails?.[hour]
+        if (d?.reqs?.length) {
+          lines.push('', '需求提交：')
+          for (const r of d.reqs) lines.push(`· ${r.serial} ×${r.count}${r.title ? ` — ${r.title}` : ''}`)
+        }
+        if (d?.chats?.length) {
+          lines.push('', '聊天内容：')
+          for (const c of d.chats) lines.push(`· ${c.sender ? `${c.sender}：` : ''}${c.text}`)
+        }
+        return lines.join('\n')
+      }
       return h('div', { className: 'wh-content' },
         h(Card, {
           title: '工作时间热力图',
           sub: `${data.range.startDate} ~ ${data.range.endDate} · 活动代理指标，非实际工时`,
         },
           h(Heatmap, { matrix: data.matrix })),
-        h(Card, { title: '时段分布', sub: '按小时聚合' },
+        h(Card, { title: '时段分布', sub: '按小时聚合 · 悬浮查看需求提交与聊天内容' },
           h('div', { className: 'wh-hour' },
             data.hourHistogram.map((n, hour) =>
               h('div', {
                 key: hour,
                 className: n ? 'wh-hour-bar' : 'wh-hour-bar dim',
-                title: `${hour}:00 — ${n} 事件`,
+                title: hourTip(hour, n),
                 style: { height: `${Math.max(2, (n / maxHour) * 100)}%` },
               }))),
           h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: 6 } },

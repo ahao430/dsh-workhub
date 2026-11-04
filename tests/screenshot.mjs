@@ -128,10 +128,10 @@ const MOCK = {
   },
   '/api/workhub/calendar?': {
     days: [
-      { date: '2026-10-30', events: 42, meetings: 2, todos: 6, chats: 0, reports: 1, commits: 30, requirements: 3, tasks: 0, attendance: 2, checkIn: '09:12', checkOut: '20:41', attendanceComplete: true, worklogHours: 9.5, worklogEntries: 1, topRequirement: { serial: 'DEMO-101', count: 7 }, milestoneCount: 5, milestones: [], projects: { '示例项目 A': 12 }, hasSummary: true },
-      { date: '2026-11-02', events: 64, meetings: 1, todos: 4, chats: 96, reports: 1, commits: 22, requirements: 5, tasks: 1, attendance: 0, worklogHours: 9, worklogEntries: 1, topRequirement: { serial: 'DEMO-101', count: 8 }, milestoneCount: 9, milestones: [], projects: { '示例项目 A': 18 }, hasSummary: true },
-      { date: '2026-11-03', events: 58, meetings: 1, todos: 3, chats: 84, reports: 1, commits: 15, requirements: 3, tasks: 0, attendance: 2, checkIn: '09:43', checkOut: '21:17', attendanceComplete: true, worklogHours: 10.6, worklogEntries: 1, topRequirement: { serial: 'DEMO-103', count: 6 }, milestoneCount: 7, milestones: [], projects: { '示例项目 A': 9 }, hasSummary: false },
-      { date: '2026-11-04', events: 28, meetings: 0, todos: 2, chats: 28, reports: 0, commits: 5, requirements: 1, tasks: 0, attendance: 2, checkIn: '08:58', checkOut: '18:30', attendanceComplete: true, worklogHours: 8.5, worklogEntries: 1, topRequirement: { serial: 'DEMO-104', count: 2 }, milestoneCount: 2, milestones: [], projects: { '示例项目 B': 4 }, hasSummary: false },
+      { date: '2026-10-30', events: 42, meetings: 2, todos: 6, chats: 0, reports: 1, commits: 30, requirements: 3, tasks: 0, attendance: 2, checkIn: '09:12', checkOut: '20:41', attendanceComplete: true, worklogHours: 9.5, worklogEntries: 1, topRequirement: { serial: 'DEMO-101', count: 7 }, topReqs: [{ serial: 'DEMO-101', count: 7, title: 'DEMO-101 接口适配：兼容旧版返回结构' }, { serial: 'DEMO-102', count: 2, title: 'DEMO-102 示例需求：会员权益行权' }], milestoneCount: 5, milestones: [], projects: { '示例项目 A': 12 }, hasSummary: true },
+      { date: '2026-11-02', events: 64, meetings: 1, todos: 4, chats: 96, reports: 1, commits: 22, requirements: 5, tasks: 1, attendance: 0, worklogHours: 9, worklogEntries: 1, topRequirement: { serial: 'DEMO-101', count: 8 }, topReqs: [{ serial: 'DEMO-101', count: 8, title: 'DEMO-101 接口适配：兼容旧版返回结构' }], milestoneCount: 9, milestones: [], projects: { '示例项目 A': 18 }, hasSummary: true },
+      { date: '2026-11-03', events: 58, meetings: 1, todos: 3, chats: 84, reports: 1, commits: 15, requirements: 3, tasks: 0, attendance: 2, checkIn: '09:43', checkOut: '21:17', attendanceComplete: true, worklogHours: 10.6, worklogEntries: 1, topRequirement: { serial: 'DEMO-103', count: 6 }, topReqs: [{ serial: 'DEMO-103', count: 6, title: 'DEMO-103 网关超时参数调优' }, { serial: 'DEMO-101', count: 2, title: 'DEMO-101 接口适配：兼容旧版返回结构' }], milestoneCount: 7, milestones: [], projects: { '示例项目 A': 9 }, hasSummary: false },
+      { date: '2026-11-04', events: 28, meetings: 0, todos: 2, chats: 28, reports: 0, commits: 5, requirements: 1, tasks: 0, attendance: 2, checkIn: '08:58', checkOut: '18:30', attendanceComplete: true, worklogHours: 8.5, worklogEntries: 1, topRequirement: { serial: 'DEMO-104', count: 2 }, topReqs: [{ serial: 'DEMO-104', count: 2, title: 'DEMO-104 示例需求：埋点补齐' }], milestoneCount: 2, milestones: [], projects: { '示例项目 B': 4 }, hasSummary: false },
     ],
   },
   '/api/workhub/calendar/day?': {
@@ -251,6 +251,15 @@ const MOCK = {
       return 2 + ((d + h) % 3)
     })),
     hourHistogram: Array.from({ length: 24 }, (_, h) => (h < 8 || h > 21 ? 0 : h < 12 ? 18 + h : h < 18 ? 24 + (h % 7) : 9 + (h % 5))),
+    hourDetails: Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      reqs: h >= 9 && h <= 21 && h % 3 === 0
+        ? [{ serial: 'DEMO-101', count: 2 + (h % 3), title: 'DEMO-101 接口适配：兼容旧版返回结构' }, { serial: 'DEMO-103', count: 1, title: 'DEMO-103 网关超时参数调优' }]
+        : [],
+      chats: h === 10 || h === 16
+        ? [{ sender: '张三', text: 'DEMO-101 的接口文档我下午补齐，大家先按旧结构联调' }, { sender: '李四', text: '灰度实例偶发 502，怀疑超时配置' }]
+        : [],
+    })),
     topActors: [{ actor: '张三', n: 48 }, { actor: '李四', n: 36 }, { actor: '王五', n: 21 }, { actor: '赵六', n: 14 }, { actor: '孙七', n: 9 }],
   },
   '/api/workhub/actions/pipelines': {
