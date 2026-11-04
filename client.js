@@ -2170,35 +2170,47 @@ window.__ModuleLoader__.load({
     const envTone = (s) => (s === 'RUNNING' ? 'ok' : s === 'DEPLOYING' ? 'brand' : s === 'ERROR' ? 'bad' : 'neutral')
     const orderTone = (s) => (s === 'SUCCESS' ? 'ok' : s === 'FAILED' ? 'bad' : s === 'RUNNING' || s === 'INIT' || s === 'PREPARING' ? 'brand' : 'neutral')
 
+    /* 快捷执行页内存缓存：切页不丢状态，回页秒显再后台刷新 */
+    const actionsMem = { data: null, appsData: null, selApp: '', detail: {} }
+
     function ActionsPage({ initialTab = 'flow' }) {
-      const [data, setData] = useState(null)
+      const [data, setData] = useState(actionsMem.data)
       const [msg, setMsg] = useState(null)
       const [busy, setBusy] = useState('')
-      const [appsData, setAppsData] = useState(null)
-      const [selApp, setSelApp] = useState('')
-      const [detail, setDetail] = useState(null)
+      const [appsData, setAppsData] = useState(actionsMem.appsData)
+      const [selApp, setSelApp] = useState(actionsMem.selApp)
+      const [detail, setDetail] = useState(actionsMem.detail[actionsMem.selApp] ?? null)
       const [prefs, setPrefs] = useState(null)
       const [search, setSearch] = useState('')
       const [envFilter, setEnvFilter] = useState('')
       const [noteDraft, setNoteDraft] = useState('')
       const [noteBusy, setNoteBusy] = useState(false)
-      const load = useCallback(() => api('/actions/pipelines').then(setData).catch((e) => setMsg(String(e.message))), [])
+      const load = useCallback(() => api('/actions/pipelines').then((r) => { actionsMem.data = r; setData(r) }).catch((e) => setMsg(String(e.message))), [])
       useEffect(() => { void load() }, [load])
 
       useEffect(() => {
         void api('/actions/appstack')
           .then((r) => {
+            actionsMem.appsData = r
             setAppsData(r)
-            if (r.apps?.length) setSelApp((cur) => cur || r.apps[0].name)
+            setSelApp((cur) => cur || r.apps?.[0]?.name || '')
           })
-          .catch((e) => setAppsData({ apps: [], error: { message: String(e.message) } }))
+          .catch((e) => setAppsData((p0) => p0 ?? { apps: [], error: { message: String(e.message) } }))
       }, [])
 
       useEffect(() => {
         if (!selApp) return
-        setDetail(null)
+        actionsMem.selApp = selApp
+        setDetail(actionsMem.detail[selApp] ?? null) // 有缓存立即显示，无缓存才进加载态
         void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`)
-          .then(setDetail)
+          .then((r) => {
+            if (!r.error) {
+              const keys = Object.keys(actionsMem.detail)
+              if (keys.length > 12) delete actionsMem.detail[keys[0]]
+              actionsMem.detail[selApp] = r
+            }
+            setDetail(r)
+          })
           .catch((e) => setDetail({ error: { message: String(e.message) } }))
       }, [selApp])
 
@@ -2252,7 +2264,7 @@ window.__ModuleLoader__.load({
         try {
           const r = await api('/actions/appstack/rollback', { method: 'POST', body: JSON.stringify({ appName: selApp, envName: o.envName, sn: o.sn, userConfirmed: true }) })
           setMsg(`已创建回滚部署单「${r.order?.name ?? ''}」→ 目标 ${r.toVersion || o.version || o.name}`)
-          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then(setDetail)
+          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
           load()
         } catch (e) { setMsg(`回滚失败: ${e.message}`) } finally { setBusy('') }
       }
@@ -2265,7 +2277,7 @@ window.__ModuleLoader__.load({
         try {
           const r = await api('/actions/appstack/deploy', { method: 'POST', body: JSON.stringify({ appName: selApp, envName, userConfirmed: true }) })
           setMsg(`已创建部署单「${r.order?.name ?? ''}」· 状态 ${r.order?.state || 'INIT'}`)
-          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then(setDetail)
+          void api(`/actions/appstack/detail?app=${encodeURIComponent(selApp)}`).then((r) => { if (!r.error) actionsMem.detail[selApp] = r; setDetail(r) })
           load()
         } catch (e) { setMsg(`部署失败: ${e.message}`) } finally { setBusy('') }
       }
