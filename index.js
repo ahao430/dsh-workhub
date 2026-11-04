@@ -30,7 +30,13 @@ export function apply(ctx) {
   // 自动周报草稿：每小时检查一次，周五 17 点后生成本周按人分区草稿（report.weeklyAuto 开关）
   ctx.effect(() => {
     const tick = async () => {
-      try { router.db.saveWeeklyDraftIfDue?.() } catch {}
+      try {
+        const analysis = await router.db.saveWeeklyDraftIfDue?.()
+        if (analysis) {
+          const title = analysis.payload?.title ?? '本周周报草稿'
+          await router.notifySend?.(`WorkHub · ${title} 已生成，到报告页修改后提交`).catch(() => {})
+        }
+      } catch {}
     }
     void tick()
     const weeklyTimer = setInterval(tick, 60 * 60 * 1000)

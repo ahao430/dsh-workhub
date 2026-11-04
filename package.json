@@ -1,6 +1,6 @@
 {
   "name": "@ahao430/dsh-workhub",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal work-intelligence hub for DingTalk and Yunxiao inside DeepSeek Harness: syncs work data into local SQLite and exposes dashboards, a work calendar, project analysis, reports and workhub_* agent tools.",
   "type": "module",
   "license": "MIT",
