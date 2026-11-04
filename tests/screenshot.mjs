@@ -314,6 +314,11 @@ const MOCK = {
       reqs: ['王昊', '杨涛', '鲁媛', '李雅丽'],
       chats: ['王昊', '王光明', '赵家彬'],
     },
+    unmapped: ['sunyinwang', 'xtl', 'cabin'],
+    ignored: [],
+  },
+  '/api/workhub/onboarding/detect': {
+    self: null, dept: null, identityConfigured: true, groupsCount: 1, dismissed: false, errors: [],
   },
   '/api/workhub/analytics/group?': {
     range: { startDate: '2026-10-29', endDate: '2026-11-04' },

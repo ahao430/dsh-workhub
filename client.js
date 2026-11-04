@@ -1175,15 +1175,75 @@ react-is/cjs/react-is.production.js:
       const [gBusy, setGBusy] = useState(false)
       const [deptName, setDeptName] = useState('')
       const [gcand, setGcand] = useState([])
+      const [ob, setOb] = useState(null)
+      const [obBusy, setObBusy] = useState(false)
+      const [unmapped, setUnmapped] = useState([])
+      const [ignored, setIgnored] = useState([])
+      const [markFor, setMarkFor] = useState('')
+      const [markGroup, setMarkGroup] = useState('')
+      const [markMember, setMarkMember] = useState('')
 
+      const refreshGroups = useCallback(() => api('/groups').then((r) => {
+        setGroups(r.groups ?? [])
+        setUnmapped(r.unmapped ?? [])
+        setIgnored(r.ignored ?? [])
+        setGcand([...new Set([...(r.candidates?.commits ?? []), ...(r.candidates?.reqs ?? []), ...(r.candidates?.chats ?? [])])].slice(0, 16))
+      }).catch(() => {}), [])
+      useEffect(() => { void refreshGroups() }, [refreshGroups])
+
+      /* 新装引导：未配置身份或部门时自动识别（dws 自档案 + 通讯录部门），一键采用 */
       useEffect(() => {
-        void api('/groups')
-          .then((r) => {
-            setGroups(r.groups ?? [])
-            setGcand([...new Set([...(r.candidates?.commits ?? []), ...(r.candidates?.reqs ?? []), ...(r.candidates?.chats ?? [])])].slice(0, 16))
-          })
-          .catch(() => {})
+        void api('/onboarding/detect').then(setOb).catch(() => {})
       }, [])
+
+      const applyOnboarding = async () => {
+        if (!ob?.self?.name) return
+        setObBusy(true)
+        try {
+          const deptLeaf = (ob.dept?.deptName ?? ob.self.deptName ?? '').split('-').pop() || '我的部门'
+          const jobs = []
+          if (!(identity?.actors ?? []).length) {
+            jobs.push(api('/identity', { method: 'POST', body: JSON.stringify({ actors: [ob.self.name] }) }))
+          }
+          if (ob.dept?.members?.length && !(groups ?? []).some((g) => g.name === deptLeaf)) {
+            jobs.push(api('/groups', { method: 'POST', body: JSON.stringify({ groups: [...(groups ?? []), { name: deptLeaf, members: ob.dept.members }] }) }))
+          }
+          await Promise.all(jobs)
+          const [id] = await Promise.all([api('/identity'), refreshGroups()])
+          setIdentity(id)
+          setIdDraft((id.actors ?? []).join(', '))
+          setMsg(`已采用检测身份「${ob.self.name}」${ob.dept?.members?.length ? `与部门「${deptLeaf}」（${ob.dept.members.length} 人）` : ''}。git 署名不同的成员可在下方「未归属署名」点选标记`)
+          setOb(null)
+        } catch (e) { setMsg(`一键采用失败: ${e.message}`) } finally { setObBusy(false) }
+      }
+
+      const dismissOnboarding = async () => {
+        try { await api('/onboarding/dismiss', { method: 'POST', body: '{}' }) } catch { /* 忽略 */ }
+        setOb(null)
+      }
+
+      /* 未归属署名 → 标记为某成员的别名，或忽略 */
+      const markApply = async () => {
+        if (!markFor || !markGroup || !markMember) { setMsg('先选择部门与成员'); return }
+        const next = (groups ?? []).map((g) => (g.id !== markGroup ? g : {
+          ...g,
+          members: g.members.map((m) => (m.name !== markMember ? m : { ...m, aliases: [...new Set([...m.aliases, markFor])] })),
+        }))
+        try {
+          await api('/groups', { method: 'POST', body: JSON.stringify({ groups: next }) })
+          await refreshGroups()
+          setMarkFor(''); setMarkGroup(''); setMarkMember('')
+          setMsg(`已把署名「${markFor}」标记为 ${markMember} 的别名`)
+        } catch (e) { setMsg(`标记失败: ${e.message}`) }
+      }
+
+      const ignoreActor = async (name) => {
+        try {
+          await api('/groups/ignore-actor', { method: 'POST', body: JSON.stringify({ name }) })
+          await refreshGroups()
+          if (markFor === name) { setMarkFor(''); setMarkGroup(''); setMarkMember('') }
+        } catch (e) { setMsg(`忽略失败: ${e.message}`) }
+      }
 
       const saveGroup = async () => {
         const name = gName.trim()
@@ -1335,6 +1395,27 @@ react-is/cjs/react-is.production.js:
       return h('div', { className: 'wh-content' },
         h(SourcesSection),
         msg ? h('div', { className: 'wh-card', style: { fontSize: 12, wordBreak: 'break-all' } }, msg) : null,
+        ob && !ob.dismissed && !ob.identityConfigured && ob.self?.name
+          ? h(Card, {
+              title: '检测到你的身份',
+              sub: '来自钉钉登录账号与通讯录自档案 · 一键采用后生效',
+            },
+            h('div', { className: 'wh-toolbar', style: { gap: 10, flexWrap: 'wrap', alignItems: 'center' } },
+              h('span', { style: { fontSize: 12.5 } },
+                `你是「${ob.self.name}」`,
+                ob.self.deptName ? ` · ${ob.self.deptName}` : '',
+                ob.dept?.members?.length ? `（${ob.dept.members.length} 名成员）` : ''),
+              h(Btn, { size: 'sm', variant: 'primary', disabled: obBusy, onClick: applyOnboarding },
+                obBusy ? '采用中…' : '一键采用'),
+              h(Btn, { size: 'sm', variant: 'ghost', onClick: dismissOnboarding }, '本次不提示')),
+            ob.dept?.members?.length
+              ? h('div', { style: { marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5 } },
+                  ob.dept.members.map((m) => h(Chip, { key: m, tone: m === ob.self.name ? 'brand' : 'neutral' }, m)))
+              : null,
+            (ob.errors ?? []).length
+              ? h('div', { className: 'wh-muted', style: { fontSize: 11, marginTop: 6 } }, ob.errors.join('；'))
+              : null)
+          : null,
         h(Card, {
           title: '我的身份',
           sub: '进行中需求只显示与你相关的：钉钉名 / 云效提交署名，多个用逗号分隔',
@@ -1382,6 +1463,43 @@ react-is/cjs/react-is.production.js:
                     }, '编辑'),
                     h(Btn, { size: 'sm', variant: 'ghost', disabled: gBusy, onClick: () => deleteGroup(g.id) }, '删除'))))
             : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '还没有部门。新建一个，或从钉钉通讯录导入'),
+          (groups ?? []).length && (unmapped.length || markFor)
+            ? h('div', { style: { marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 } },
+                h('div', { className: 'wh-muted', style: { fontSize: 11 } },
+                  '未归属署名（点击标记为成员别名，标记后该成员的提交统计才完整）：'),
+                h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } },
+                  unmapped.map((c) =>
+                    h(Chip, {
+                      key: c, tone: markFor === c ? 'brand' : 'neutral', style: { cursor: 'pointer' },
+                      onClick: () => {
+                        if (markFor === c) { setMarkFor(''); return }
+                        setMarkFor(c)
+                        const g0 = (groups ?? [])[0]
+                        setMarkGroup((p0) => p0 || g0?.id || '')
+                        setMarkMember('')
+                      },
+                    }, c)),
+                  ignored.length
+                    ? h('span', { className: 'wh-muted', style: { fontSize: 11, alignSelf: 'center' } }, `已忽略 ${ignored.length} 个`)
+                    : null),
+                markFor
+                  ? h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
+                      h(WhSelect, {
+                        value: markGroup, style: { minWidth: 110 },
+                        onChange: (e) => { setMarkGroup(e.target.value); setMarkMember('') },
+                        options: (groups ?? []).map((g) => ({ value: g.id, label: g.name })),
+                      }),
+                      h(WhSelect, {
+                        value: markMember, style: { minWidth: 110 }, placeholder: '选择成员',
+                        onChange: (e) => setMarkMember(e.target.value),
+                        options: ((groups ?? []).find((g) => g.id === markGroup)?.members ?? [])
+                          .map((m) => ({ value: m.name, label: m.name })),
+                      }),
+                      h(Btn, { size: 'sm', variant: 'primary', disabled: !markMember, onClick: markApply }, '设为别名'),
+                      h(Btn, { size: 'sm', variant: 'ghost', onClick: () => ignoreActor(markFor) }, '忽略'),
+                      h(Btn, { size: 'sm', variant: 'ghost', onClick: () => setMarkFor('') }, '取消'))
+                  : null)
+            : null,
           gEditId || gName || gMembers
             ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 } },
                 h('div', { className: 'wh-toolbar', style: { gap: 6, flexWrap: 'wrap' } },
