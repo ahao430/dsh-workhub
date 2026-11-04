@@ -28,5 +28,8 @@ jobs:
       - name: 渲染冒烟测试（8 个页面 + 数据子组件）
         run: node tests/render-check.mjs
 
+      - name: Antd vendor 完整性
+        run: node scripts/build-antd.mjs --check
+
       - name: 发布物料完整性
         run: node tests/manifest-check.mjs
