@@ -2284,7 +2284,7 @@ react-is/cjs/react-is.production.js:
 
     const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
-    function DayPanel({ date, projectId }) {
+    function DayPanel({ date, projectId, onDataRefreshed, refreshKey = 0 }) {
       const [data, setData] = useState(null)
       const [err, setErr] = useState(null)
       const [copied, setCopied] = useState(false)
@@ -2292,6 +2292,7 @@ react-is/cjs/react-is.production.js:
       const [genMsg, setGenMsg] = useState(null)
       const [expanded, setExpanded] = useState(false)
       const [tab, setTab] = useState('summary')
+      const [busyDay, setBusyDay] = useState(false)
       const reload = useCallback(() => {
         setData(null); setErr(null)
         const q = new URLSearchParams({ date })
@@ -2299,6 +2300,19 @@ react-is/cjs/react-is.production.js:
         return api(`/calendar/day?${q}`).then(setData).catch((e) => setErr(String(e.message)))
       }, [date, projectId])
       useEffect(() => { void reload() }, [reload])
+      useEffect(() => { if (refreshKey) void reload() }, [refreshKey])
+
+      /* 手动刷新单日：按需同步该日相关数据源（钉钉考勤+日程，考勤为近 5 天滚动窗口）。
+       * 成功后经 onDataRefreshed 触发 refreshKey：日详情 / 月格 / 日程标记 / 今日待办统一重取
+       * （POST 已清客户端缓存，读取必为新数据） */
+      const refreshDay = async () => {
+        setBusyDay(true)
+        try {
+          await api('/sync/run', { method: 'POST', body: JSON.stringify({ sources: ['dws.attendance', 'dws.calendar'] }) })
+          onDataRefreshed?.()
+          toast('该日数据已刷新（考勤 + 钉钉日程）')
+        } catch (e) { toast(`刷新失败: ${e.message}`, 'bad') } finally { setBusyDay(false) }
+      }
 
       const quickGenerate = async () => {
         setBusyGen(true); setGenMsg(null)
@@ -2355,7 +2369,7 @@ react-is/cjs/react-is.production.js:
       const extraBlocks = [
         h('div', { key: 'dt', style: { marginTop: 12 } },
           h('div', { className: 'wh-section-title' }, '日程 · 待办（钉钉）'),
-          h(Card, null, h(DingTalkToday, { date }))),
+          h(Card, null, h(DingTalkToday, { date, refreshKey }))),
         meta.myToday?.length
           ? h('div', { key: 'today', style: { marginTop: 12 } },
               h('div', { className: 'wh-section-title' }, '我今天做了什么'),
@@ -2543,7 +2557,12 @@ react-is/cjs/react-is.production.js:
             disabled: busyGen,
             onClick: quickGenerate,
           }, busyGen ? '生成中…' : '快捷生成总结'),
-          h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, copied ? '已复制 ✓' : 'AI 精修')),
+          h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, copied ? '已复制 ✓' : 'AI 精修'),
+          h(Btn, {
+            size: 'sm', variant: 'ghost', disabled: busyDay,
+            onClick: refreshDay,
+            title: '重新同步该日相关数据（钉钉考勤 + 日程），并刷新月历卡片',
+          }, busyDay ? '同步中…' : '↻ 刷新该日')),
       },
         genMsg ? h('div', { className: 'wh-muted', style: { marginBottom: 8 } }, genMsg) : null,
         summaryBlock,
@@ -2688,20 +2707,21 @@ react-is/cjs/react-is.production.js:
       const [view, setView] = useState('month')
       const [extraDays, setExtraDays] = useState({})
       const [retryKey, setRetryKey] = useState(0)
+      const [dayRefresh, setDayRefresh] = useState(0) // 日详情「刷新该日」局部刷新信号（月格 + 日程标记 + 日详情联动）
       useEffect(() => { api('/projects').then((r) => setProjects(r.projects)).catch(() => {}) }, [])
       useEffect(() => {
         const q = new URLSearchParams({ month })
         if (projectFilter) q.set('projectId', projectFilter)
         setCalErr(null)
         api(`/calendar?${q}`).then((r) => { setData(r); setCalErr(null) }).catch((e) => { setData(null); setCalErr(String(e.message)) })
-      }, [month, projectFilter, refreshKey, retryKey])
+      }, [month, projectFilter, refreshKey, retryKey, dayRefresh])
       // 钉钉日程标记单独加载（不阻塞日历主体），到达后合并
       useEffect(() => {
         let alive = true
         setAgendaByDay({})
         api(`/calendar/agenda?month=${month}`).then((r) => { if (alive) setAgendaByDay(r.byDay ?? {}) }).catch(() => {})
         return () => { alive = false }
-      }, [month, refreshKey])
+      }, [month, refreshKey, dayRefresh])
       // 周视图跨月时补拉邻月数据（否则邻月日期会误显示「未打卡」）
       useEffect(() => {
         if (view !== 'week') { setExtraDays({}); return undefined }
@@ -2800,7 +2820,12 @@ react-is/cjs/react-is.production.js:
               h('div', { className: 'wh-cal-head' },
                 weekStart.map((date) => h('div', { key: date, className: 'wh-cal-wd' }, `周${'一二三四五六日'[(new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))).getDay() + 6) % 7]}`))),
               h('div', { className: 'wh-cal' }, weekEls)),
-        h(DayPanel, { date: selected, projectId: projectFilter || undefined }))
+        h(DayPanel, {
+          date: selected,
+          projectId: projectFilter || undefined,
+          refreshKey: dayRefresh,
+          onDataRefreshed: () => setDayRefresh((k) => k + 1),
+        }))
     }
 
     /* ----------------------------- Reports ------------------------------ */
@@ -3220,7 +3245,7 @@ react-is/cjs/react-is.production.js:
         return data
       })
     }
-    function DingTalkToday({ date }) {
+    function DingTalkToday({ date, refreshKey = 0 }) {
       const [data, setData] = useState(null)
       const [busy, setBusy] = useState('')
       const load = useCallback((force) => {
@@ -3230,6 +3255,7 @@ react-is/cjs/react-is.production.js:
         loadDingTalkToday(date).then(setData).catch(() => setData({ events: [], todos: [], approvals: [] }))
       }, [date])
       useEffect(() => { load() }, [load])
+      useEffect(() => { if (refreshKey) load(true) }, [refreshKey]) // 「刷新该日」联动：绕过 dtMem 缓存
       const completeTodo = async (t) => {
         if (!(await whConfirm('完成待办？', t.subject ?? '', { okText: '完成' }))) return
         setBusy(`c:${t.taskId}`)
