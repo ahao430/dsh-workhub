@@ -253,7 +253,7 @@ react-is/cjs/react-is.production.js:
     /* GET 响应内存缓存：切页/预加载命中即秒开；动态端点（轮询/状态）不缓存。 */
     const apiCache = new Map()
     const API_TTL_MS = 90_000
-    const API_NO_CACHE = ['/actions/appstack/flow/status', '/update/check', '/dt/todos', '/dt/agenda', '/dt/approvals', '/depts', '/auth/']
+    const API_NO_CACHE = ['/actions/appstack/flow/status', '/update/check', '/dt/todos', '/dt/agenda', '/dt/approvals', '/depts', '/auth/', '/ai/']
     const apiCachePeek = (path) => apiCache.get(path)?.data ?? null
     const apiCacheClear = () => apiCache.clear()
 
@@ -3162,6 +3162,250 @@ react-is/cjs/react-is.production.js:
         chatId ? h(TopicsSection, { chatId }) : null)
     }
 
+    /* ---------------------------- AI 对话 ---------------------------- */
+    /* 面板内聊天：模型与 Key 全部来自 DSH（llm 服务），本插件只提供工作数据上下文与会话历史。
+     * 流式协议：POST /ai/chat/send 返回 SSE（meta → delta* → done/error）。 */
+
+    const aiChatMem = { controller: null, skipLoadId: null }
+    const AI_SUGGESTIONS = [
+      '我最近一周主要在做什么？',
+      '进行中的需求有哪些，各自什么状态？',
+      '最近两周的工作节奏有什么变化？',
+      '帮我把今天的工作整理成日报草稿',
+    ]
+
+    /** 行内 markdown：**粗体** 与 `代码`。 */
+    function aiInline(text, key) {
+      const parts = []
+      const re = /(\*\*[^*]+\*\*|`[^`]+`)/g
+      let last = 0
+      let m
+      let i = 0
+      while ((m = re.exec(text))) {
+        if (m.index > last) parts.push(text.slice(last, m.index))
+        const tok = m[0]
+        if (tok.startsWith('**')) parts.push(h('strong', { key: `${key}-b${i}` }, tok.slice(2, -2)))
+        else parts.push(h('code', { key: `${key}-c${i}`, style: { background: 'var(--dsw-alias-fill-quaternary)', borderRadius: 4, padding: '0 4px', fontSize: 11.5 } }, tok.slice(1, -1)))
+        last = m.index + tok.length
+        i++
+      }
+      if (last < text.length) parts.push(text.slice(last))
+      return parts
+    }
+
+    /** 极简 markdown 块渲染：标题 / 无序·有序列表 / 段落（不引渲染库）。 */
+    function AiMd({ text }) {
+      const out = []
+      const lines = String(text ?? '').split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trimEnd()
+        if (!t.trim()) { out.push(h('div', { key: i, style: { height: 6 } })); continue }
+        let mm
+        if ((mm = t.match(/^(#{1,4})\s+(.*)$/))) {
+          out.push(h('div', { key: i, style: { fontWeight: 600, margin: '6px 0 2px' } }, aiInline(mm[2], i)))
+        } else if ((mm = t.match(/^\s*[-*·]\s+(.*)$/))) {
+          out.push(h('div', { key: i, style: { display: 'flex', gap: 6 } },
+            h('span', { style: { color: 'var(--wh-accent)', flex: 'none' } }, '•'),
+            h('span', { style: { flex: 1 } }, aiInline(mm[1], i))))
+        } else if ((mm = t.match(/^\s*(\d+)[.、)]\s+(.*)$/))) {
+          out.push(h('div', { key: i, style: { display: 'flex', gap: 6 } },
+            h('span', { style: { color: 'var(--dsw-alias-label-secondary)', flex: 'none' } }, `${mm[1]}.`),
+            h('span', { style: { flex: 1 } }, aiInline(mm[2], i))))
+        } else {
+          out.push(h('div', { key: i }, aiInline(t, i)))
+        }
+      }
+      return h('div', { style: { fontSize: 12.5, lineHeight: 1.7, wordBreak: 'break-word' } }, out)
+    }
+
+    function AiChatPage() {
+      const [chats, setChats] = useState(null)          // 会话列表 | null=加载中
+      const [activeId, setActiveId] = useState(null)    // 当前会话 id | null=新对话
+      const [msgs, setMsgs] = useState([])
+      const [models, setModels] = useState(undefined)   // undefined=加载中, null=不可用
+      const [input, setInput] = useState('')
+      const [streaming, setStreaming] = useState(false)
+      const [err, setErr] = useState(null)
+
+      const reloadChats = () => api('/ai/chats').then((r) => setChats(r.chats ?? [])).catch(() => setChats([]))
+      useEffect(() => { void reloadChats() }, [])
+      useEffect(() => { api('/llm/models').then(setModels).catch(() => setModels(null)) }, [])
+      useEffect(() => {
+        if (activeId == null) { setMsgs([]); return }
+        if (aiChatMem.skipLoadId === activeId) { aiChatMem.skipLoadId = null; return } // 本轮流式已持有最新消息
+        setErr(null)
+        api(`/ai/chat/messages?id=${activeId}`).then((r) => setMsgs(r.messages ?? [])).catch((e) => setErr(String(e.message)))
+      }, [activeId])
+      useEffect(() => {
+        const el = document.getElementById('wh-aichat-scroll')
+        if (el) el.scrollTop = el.scrollHeight
+      }, [msgs])
+
+      const send = async () => {
+        const text = input.trim()
+        if (!text || streaming) return
+        setInput('')
+        setErr(null)
+        const asstId = `a${Date.now()}`
+        setMsgs((prev) => [...prev, { id: `u${Date.now()}`, role: 'user', content: text }, { id: asstId, role: 'assistant', content: '', streaming: true }])
+        setStreaming(true)
+        const controller = new AbortController()
+        aiChatMem.controller = controller
+        const finish = (patch) => setMsgs((prev) => prev.map((m) => (m.id === asstId ? { ...m, streaming: false, ...patch } : m)))
+        try {
+          const res = await fetch('/api/workhub/ai/chat/send', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ chatId: activeId, message: text }),
+            signal: controller.signal,
+          })
+          if (!res.ok || !res.body) {
+            const b = await res.json().catch(() => null)
+            throw new Error(b?.error?.message || `HTTP ${res.status}`)
+          }
+          const reader = res.body.getReader()
+          const dec = new TextDecoder()
+          let buf = ''
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buf += dec.decode(value, { stream: true })
+            let idx
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+              const raw = buf.slice(0, idx)
+              buf = buf.slice(idx + 2)
+              const line = raw.split('\n').find((l) => l.startsWith('data:'))
+              if (!line) continue
+              let ev
+              try { ev = JSON.parse(line.slice(5).trim()) } catch { continue }
+              if (ev.type === 'meta') {
+                if (activeId == null) { aiChatMem.skipLoadId = ev.chatId; setActiveId(ev.chatId) }
+                void reloadChats()
+              } else if (ev.type === 'delta') {
+                setMsgs((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: m.content + ev.text } : m)))
+              } else if (ev.type === 'done') {
+                finish({ aborted: ev.aborted })
+              } else if (ev.type === 'error') {
+                finish({ error: ev.message })
+              }
+            }
+          }
+          finish({})
+        } catch (e) {
+          if (e?.name === 'AbortError') finish({ aborted: true })
+          else { finish({ error: String(e.message) }); setErr(String(e.message)) }
+        } finally {
+          aiChatMem.controller = null
+          setStreaming(false)
+        }
+      }
+
+      const stop = () => aiChatMem.controller?.abort()
+      const openChat = (id) => {
+        if (streaming) { toast('回答生成中，先停止或等待完成', 'warn'); return }
+        setActiveId(id)
+      }
+      const newChat = () => {
+        if (streaming) { toast('回答生成中，先停止或等待完成', 'warn'); return }
+        setActiveId(null)
+      }
+      const del = async (id) => {
+        if (!(await whConfirm('删除该对话？', '消息记录将一并删除，不可恢复。', { danger: true, okText: '删除' }))) return
+        try { await api('/ai/chat/delete', { method: 'POST', body: JSON.stringify({ id }) }) } catch (e) { toast(`删除失败：${e.message}`, 'bad'); return }
+        if (activeId === id) { setActiveId(null); setMsgs([]) }
+        void reloadChats()
+      }
+
+      const unavailable = models === null
+      const sel = models?.selection
+      const modelChip = sel
+        ? h('span', { className: 'wh-chip', title: '模型来自 DSH 配置，可在侧边栏「AI 模型」切换' },
+            `模型 ${sel.model}${sel.source === 'dsh-default' ? '（DSH 默认）' : ''}`)
+        : null
+
+      const bubble = (m) => m.role === 'user'
+        ? h('div', {
+            key: m.id,
+            style: {
+              alignSelf: 'flex-end', maxWidth: '78%', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              background: 'color-mix(in srgb, var(--wh-accent) 12%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--wh-accent) 26%, transparent)',
+              borderRadius: '10px 10px 2px 10px', padding: '7px 10px', fontSize: 12.5, lineHeight: 1.6,
+            },
+          }, m.content)
+        : h('div', { key: m.id, style: { alignSelf: 'flex-start', maxWidth: '94%', width: '100%' } },
+            m.content
+              ? h(AiMd, { text: m.content })
+              : (m.streaming ? h('div', { className: 'wh-muted' }, '思考中…') : null),
+            m.streaming && m.content ? h('div', { className: 'wh-muted' }, '▍') : null,
+            m.error ? h('div', { style: { color: 'var(--wh-bad)', marginTop: 4, fontSize: 12 } }, `生成失败：${m.error}`) : null,
+            m.aborted && !m.streaming ? h('div', { className: 'wh-muted', style: { marginTop: 4, fontSize: 11 } }, '· 已停止（内容不完整）') : null,
+            !m.streaming && m.model ? h('div', { className: 'wh-muted', style: { marginTop: 4, fontSize: 11 } }, m.model) : null)
+
+      return h('div', { className: 'wh-content' },
+        h(Card, { title: 'AI 对话', sub: '基于本地工作数据问答 · 模型与凭证全部来自 DSH 配置', action: modelChip },
+          unavailable
+            ? h(Empty, { icon: '◌', title: 'AI 服务不可用', hint: '需要较新的 DSH Host（含 llm 服务）；插件无需配置任何 Key' })
+            : h('div', { style: { display: 'flex', gap: 12, alignItems: 'stretch' } },
+                // 左：会话列表
+                h('div', { style: { width: 172, flex: 'none', display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 520, overflowY: 'auto', paddingRight: 2 } },
+                  h(Btn, { size: 'sm', disabled: streaming, onClick: newChat, title: '开启新对话' }, '＋ 新对话'),
+                  (chats ?? []).map((c) =>
+                    h('div', {
+                      key: c.id,
+                      className: 'wh-msg',
+                      style: {
+                        display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                        borderRadius: 8, padding: '5px 8px',
+                        background: activeId === c.id ? 'var(--dsw-alias-fill-quaternary)' : 'transparent',
+                      },
+                      onClick: () => openChat(c.id),
+                    },
+                      h('div', { style: { flex: 1, minWidth: 0 } },
+                        h('div', { style: { fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, c.title || '新对话'),
+                        h('div', { className: 'wh-muted', style: { fontSize: 10.5 } }, `${String(c.updated_at ?? '').slice(5, 10)} · ${c.msgs} 条`)),
+                      h('button', {
+                        title: '删除对话',
+                        style: { border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-tertiary)', cursor: 'pointer', padding: '2px 4px', fontSize: 11 },
+                        onClick: (e) => { e.stopPropagation(); void del(c.id) },
+                      }, '✕'))),
+                  chats && !chats.length ? h('div', { className: 'wh-muted', style: { fontSize: 11.5, padding: '4px 8px' } }, '暂无历史对话') : null),
+                // 右：消息与输入
+                h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--dsw-alias-border-l1)', paddingLeft: 12 } },
+                  h('div', { id: 'wh-aichat-scroll', style: { minHeight: 300, maxHeight: 480, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 6 } },
+                    msgs.length
+                      ? msgs.map(bubble)
+                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 24 } },
+                          h(Empty, { icon: '✦', title: activeId == null ? '开始一段新对话' : '该对话没有消息', hint: '回答基于本地采集的工作数据，不会编造' }),
+                          activeId == null
+                            ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' } },
+                                AI_SUGGESTIONS.map((s) =>
+                                  h('button', {
+                                    key: s,
+                                    className: 'wh-chip neutral',
+                                    style: { cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-fill-quaternary)' },
+                                    onClick: () => setInput(s),
+                                  }, s)))
+                            : null)),
+                  err ? h('div', { style: { color: 'var(--wh-bad)', fontSize: 12, marginBottom: 6 } }, err) : null,
+                  h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 8 } },
+                    h('textarea', {
+                      value: input,
+                      rows: 2,
+                      placeholder: unavailable ? 'AI 服务不可用' : '问点什么，如：我最近一周主要在做什么？（Enter 发送，Shift+Enter 换行）',
+                      disabled: unavailable,
+                      onChange: (e) => setInput(e.target.value),
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+                      },
+                      style: { flex: 1, resize: 'none', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-fill-secondary)', color: 'var(--dsw-alias-label-primary)', padding: '7px 10px', fontSize: 12.5, fontFamily: 'inherit', lineHeight: 1.6 },
+                    }),
+                    streaming
+                      ? h(Btn, { onClick: stop, title: '停止生成' }, '■ 停止')
+                      : h(Btn, { variant: 'primary', disabled: unavailable || !input.trim(), onClick: send }, '发送'))))))
+    }
+
     /* ---------------------------- Efficiency ---------------------------- */
 
     function EfficiencyPage({ range }) {
@@ -3708,6 +3952,8 @@ react-is/cjs/react-is.production.js:
         h('path', { d: 'M3 7.5a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' })),
       chats: (p) => h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, ...p },
         h('path', { d: 'M4 5.5h16v10H9l-5 4z' })),
+      ai: (p) => h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, ...p },
+        h('path', { d: 'M4 6.5h13v9H9l-5 4z' }), h('path', { d: 'M19.5 4.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z' })),
       efficiency: (p) => h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, ...p },
         h('path', { d: 'M4 19V9M10 19V5M16 19v-7M22 19H2' })),
       reports: (p) => h('svg', { viewBox: '0 0 24 24', width: 15, height: 15, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, ...p },
@@ -3723,6 +3969,7 @@ react-is/cjs/react-is.production.js:
       ['calendar', '工作日历', CalendarPage, '按天回顾工作事件与 AI 总结', '分析'],
       ['projects', '项目分析', ProjectsPage, '跨钉钉与云效的项目进展', '分析'],
       ['chats', '聊天洞察', ChatInsightsPage, '会话统计与话题聚类', '洞察'],
+      ['ai', 'AI 对话', AiChatPage, '基于本地工作数据的工作问答', '洞察'],
       ['efficiency', '工作效能', EfficiencyPage, '工作活动分布与节奏', '洞察'],
       ['reports', '智能报告', ReportsPage, 'Agent 生成的报告草稿', '产出'],
       ['actions', '快捷执行', ActionsPage, '流水线运行与操作审计', '执行'],
@@ -4034,7 +4281,7 @@ react-is/cjs/react-is.production.js:
     }
 
     // debug/testing hook: page components for smoke tests
-    window.__WORKHUB_DEBUG__ = { PAGES, TimeBar, SourcesSection, ProjectDetail, DayPanel, TopicsSection, ChatSummarySection, Heatmap, InsightCard, Stat, Card, Btn, CSS }
+    window.__WORKHUB_DEBUG__ = { PAGES, TimeBar, SourcesSection, ProjectDetail, DayPanel, TopicsSection, ChatSummarySection, AiChatPage, AiMd, Heatmap, InsightCard, Stat, Card, Btn, CSS }
 
     return {
       inject: ['slots'],
