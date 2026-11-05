@@ -5,10 +5,15 @@
 import { createWorkHubRouter } from './lib/api.js'
 import { registerWorkHubTools } from './lib/tools.js'
 
-export const inject = ['webServer', 'tools']
+// llm：DSH 的模型服务（模型目录 + 流式调用），AI 精修全部复用 DSH 配置，插件零模型配置
+export const inject = ['webServer', 'tools', 'llm']
 
 export function apply(ctx) {
-  const router = createWorkHubRouter({})
+  const router = createWorkHubRouter({ llm: ctx.llm })
+  // 默认模型服务动态绑定（存在则支持「跟随 DSH 默认」；服务缺失不影响插件其余功能）
+  try {
+    ctx.inject(['agentDefaultModel'], (child) => router.setDefaultModelSource?.(child.agentDefaultModel))
+  } catch {}
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: router.prefix, handler: router.handler }))
 
   // Scheduled incremental sync (v2 §3.3): every 30 minutes; failures land in

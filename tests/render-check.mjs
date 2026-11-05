@@ -38,7 +38,7 @@ const mock = {
   },
   '/api/workhub/analyses?': { analyses: [{ id: 'a1', kind: 'insight', scope: {}, payload: { title: 't', description: 'd', importance: 'medium', origin: 'rule' }, sources: [{ sourceType: 'todo' }], generatedAt: '2026-11-03T10:00:00Z' }] },
   '/api/workhub/calendar?': { days: [{ date: '2026-11-03', events: 45, meetings: 0, todos: 38, chats: 3, reports: 4, attendance: 2, commits: 33, requirements: 1, tasks: 0, projects: { AI基建: 2 }, hasSummary: false }] },
-  '/api/workhub/calendar/day?': { events: [{ id: 'x', time: '09:43', sourceType: 'attendance', title: '上班', actor: '示例用户', projects: ['示例项目'] }], metrics: { total: 1, byType: { attendance: 1 }, projects: ['示例项目'] }, summary: { status: 'stale', overview: 'o', achievements: ['a'], decisions: [], blockers: [], nextActions: [], sources: [{}], generatedAt: '2026-11-03T10:00:00Z' } },
+  '/api/workhub/calendar/day?': { events: [{ id: 'x', time: '09:43', sourceType: 'attendance', title: '上班', actor: '示例用户', projects: ['示例项目'] }], metrics: { total: 1, byType: { attendance: 1 }, projects: ['示例项目'] }, summary: { status: 'stale', overview: 'o', achievements: ['a'], decisions: [], blockers: [], nextActions: [], sources: [{}], generatedAt: '2026-11-03T10:00:00Z', metrics: { generatedBy: 'ai', model: 'deepseek/deepseek-chat' } } },
   '/api/workhub/projects': { projects: [
     { id: 'p1', name: '示例项目', origin: 'user', createdAt: '', rules: { aliases: [], keywords: ['NewAPI'], chatIds: [], externalId: null } },
     { id: 'y1', name: '手充', origin: 'yunxiao', createdAt: '', rules: { aliases: [], keywords: ['SCPRO'], chatIds: [], externalId: 'abc' } }] },
@@ -53,6 +53,7 @@ const mock = {
     capabilities: [{ capability: 'dws.todo', status: 'available' }],
   },
   '/api/workhub/items?': { items: [{ id: 'i1', source_type: 'todo', title: 't', actor: 'a', occurred_at: '2026-11-03T02:00:00.000Z' }] },
+  '/api/workhub/llm/models': { providers: [{ id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat', description: null }] }], dshDefault: { provider: 'deepseek', model: 'deepseek-chat' }, selection: { provider: 'deepseek', model: 'deepseek-chat', source: 'dsh-default' } },
 }
 
 globalThis.fetch = (url) => {

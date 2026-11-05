@@ -2287,7 +2287,7 @@ react-is/cjs/react-is.production.js:
     function DayPanel({ date, projectId, onDataRefreshed, refreshKey = 0 }) {
       const [data, setData] = useState(null)
       const [err, setErr] = useState(null)
-      const [copied, setCopied] = useState(false)
+      const [busyAi, setBusyAi] = useState(false)
       const [busyGen, setBusyGen] = useState(false)
       const [genMsg, setGenMsg] = useState(null)
       const [expanded, setExpanded] = useState(false)
@@ -2318,22 +2318,19 @@ react-is/cjs/react-is.production.js:
         setBusyGen(true); setGenMsg(null)
         try {
           const r = await api('/generate/daily-draft', { method: 'POST', body: JSON.stringify({ date }) })
-          setGenMsg(r.generatedBy === 'rule' ? '已用规则引擎生成草稿（可点「AI 精修」让 Agent 润色）' : '已生成')
+          setGenMsg(r.generatedBy === 'rule' ? '已用规则引擎生成草稿（可点「AI 精修」用模型润色）' : '已生成')
           await reload()
         } catch (e) { setGenMsg(`生成失败: ${e.message}`) } finally { setBusyGen(false) }
       }
 
-      const askAi = () => {
-        const prompt = `请用 workhub_get_day_analysis_input 读取 ${date} 的工作事件，回答：当天最重要的事是什么、有哪些讨论未形成待办，并给出可追溯的来源。`
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(prompt).then(() => {
-            setCopied(true)
-            setTimeout(() => setCopied(false), 2000)
-            toast('已复制 AI 提示词，到 DSH 对话粘贴发送即可')
-          }).catch(() => toast('复制失败，请手动复制提示词', 'bad'))
-        } else {
-          toast('当前环境不支持剪贴板，请在对话中直接引用工具名', 'warn')
-        }
+      /* AI 精修直连：面板内用 DSH 配置的模型把规则草稿精修成 AI 版（不再复制提示词去对话） */
+      const askAi = async () => {
+        setBusyAi(true)
+        try {
+          const r = await api('/generate/ai-refine', { method: 'POST', body: JSON.stringify({ kind: 'day', date }) })
+          await reload()
+          toast(`AI 总结已生成（${r.model ?? 'AI'}）`)
+        } catch (e) { toast(`AI 精修失败: ${e.message}`, 'bad') } finally { setBusyAi(false) }
       }
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!data) return h(Loading)
@@ -2345,6 +2342,10 @@ react-is/cjs/react-is.production.js:
             s.status === 'stale'
               ? h('div', { style: { marginBottom: 10 } },
                   h(Chip, { tone: 'warn' }, '◐ 数据已更新，建议重新生成'))
+              : null,
+            s.metrics?.generatedBy === 'ai'
+              ? h('div', { style: { marginBottom: 10 } },
+                  h(Chip, { tone: 'brand' }, `AI · ${s.metrics.model ?? ''}`))
               : null,
             h('p', { style: { margin: '0 0 10px', lineHeight: 1.65 } }, s.overview),
             ...['achievements', 'decisions', 'blockers', 'nextActions'].map((k) => {
@@ -2557,7 +2558,7 @@ react-is/cjs/react-is.production.js:
             disabled: busyGen,
             onClick: quickGenerate,
           }, busyGen ? '生成中…' : '快捷生成总结'),
-          h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, copied ? '已复制 ✓' : 'AI 精修'),
+          h(Btn, { size: 'sm', variant: 'ghost', disabled: busyAi, onClick: askAi }, busyAi ? '生成中…' : 'AI 精修'),
           h(Btn, {
             size: 'sm', variant: 'ghost', disabled: busyDay,
             onClick: refreshDay,
@@ -3001,11 +3002,14 @@ react-is/cjs/react-is.production.js:
         } catch (e) { setMsg(`生成失败: ${e.message}`) } finally { setBusy(false) }
       }, [chatId, load])
 
-      const askAi = () => {
-        const prompt = `请用 workhub_get_chat_analysis_input 读取会话 ${chatId} 近 14 天的消息，输出：讨论主题、形成的结论、行动项（谁做什么）、未决问题，并用 workhub_save_topic_cluster 保存。`
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(prompt).then(() => setMsg('已复制 AI 提示词，去对话粘贴即可')).catch(() => {})
-        }
+      /* AI 精修直连：面板内用 DSH 配置的模型把会话消息精修成 AI 版小结 */
+      const askAi = async () => {
+        setBusy(true)
+        try {
+          const r = await api('/generate/ai-refine', { method: 'POST', body: JSON.stringify({ kind: 'chat', chatId }) })
+          setMsg(`AI 小结已生成（${r.model ?? 'AI'}）`)
+          load()
+        } catch (e) { setMsg(`AI 精修失败: ${e.message}`) } finally { setBusy(false) }
       }
 
       const del = async (id) => {
@@ -3020,7 +3024,7 @@ react-is/cjs/react-is.production.js:
       const latest = list[0]
       const head = h('div', { className: 'wh-toolbar', style: { gap: 6 } },
         h(Btn, { size: 'sm', variant: 'primary', disabled: busy, onClick: generate }, busy ? '生成中…' : '快捷生成小结'),
-        h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, 'AI 精修'))
+        h(Btn, { size: 'sm', variant: 'ghost', disabled: busy, onClick: askAi }, busy ? '生成中…' : 'AI 精修'))
       if (!latest) {
         return h(Card, { title: '会话小结', sub: '规则版：话题分组 + 行动项 + 未决问题', action: head },
           msg ? h('div', { className: 'wh-muted', style: { marginBottom: 8 } }, msg) : null,
@@ -3032,7 +3036,7 @@ react-is/cjs/react-is.production.js:
         sub: `${new Date(latest.generatedAt).toLocaleString()} · 依据 ${latest.sources?.length ?? 0} 条消息${p.generatedBy === 'rule' ? ' · 规则版' : ' · AI'}`,
         action: h('div', { className: 'wh-toolbar', style: { gap: 6 } },
           h(Btn, { size: 'sm', disabled: busy, onClick: generate }, busy ? '生成中…' : '重新生成'),
-          h(Btn, { size: 'sm', variant: 'ghost', onClick: askAi }, 'AI 精修'),
+          h(Btn, { size: 'sm', variant: 'ghost', disabled: busy, onClick: askAi }, busy ? '生成中…' : 'AI 精修'),
           h(Btn, { size: 'sm', variant: 'ghost', onClick: () => del(latest.id) }, '删除')),
       },
         msg ? h('div', { className: 'wh-muted', style: { marginBottom: 8 } }, msg) : null,
@@ -3731,6 +3735,36 @@ react-is/cjs/react-is.production.js:
         r(3, 3, 0.92), r(13, 3, 0.5), r(3, 13, 0.5), r(13, 13, 0.92))
     }
 
+    /* AI 模型选择：目录来自 DSH 的 llm 服务（插件零配置，不自存 Key）；选择存服务端，默认跟随 DSH 默认模型。
+     * DSH 不可用（旧版 Host）时整个选择器不渲染。 */
+    function AiModelPicker() {
+      const [data, setData] = useState(null)
+      const [busy, setBusy] = useState(false)
+      useEffect(() => { void api('/llm/models').then(setData).catch(() => setData({ unavailable: true })) }, [])
+      if (!data || data.unavailable) return null
+      const options = [
+        { value: '', label: data.dshDefault ? `跟随 DSH（${data.dshDefault.model}）` : '跟随 DSH 默认' },
+        ...(data.providers ?? []).flatMap((p) => (p.models ?? []).map((m) => ({ value: `${p.id}::${m.id}`, label: `${p.name} · ${m.name}` }))),
+      ]
+      const current = data.selection?.source === 'plugin' ? `${data.selection.provider}::${data.selection.model}` : ''
+      return h('div', { style: { marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+        h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 3 } }, 'AI 模型'),
+        h(WhSelect, {
+          value: current, options, disabled: busy,
+          style: { minWidth: 0 },
+          onChange: async (e) => {
+            const v = e.target.value
+            const [provider, model] = v ? v.split('::') : [null, null]
+            setBusy(true)
+            try {
+              const r = await api('/llm/prefs', { method: 'POST', body: JSON.stringify({ provider, model }) })
+              setData((p0) => ({ ...(p0 ?? {}), selection: r.selection }))
+              toast(model ? `AI 模型已切换：${model}` : 'AI 模型改为跟随 DSH 默认')
+            } catch (e2) { toast(`保存失败: ${e2.message}`, 'bad') } finally { setBusy(false) }
+          },
+        }))
+    }
+
     function DataSourcePill({ kind, label, status, onClick }) {
       const tone = kind === 'ding' ? { bg: 'rgba(22,119,255,.12)', fg: '#1677FF' }
         : { bg: 'rgba(232,93,4,.13)', fg: '#C2410C' }
@@ -3896,7 +3930,8 @@ react-is/cjs/react-is.production.js:
             ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
                 h('div', { className: 'wh-muted', style: { fontSize: 11 } }, '视角 · 进行中需求归属'),
                 scopeControl)
-            : null))
+            : null,
+          h(AiModelPicker)))
 
       const header = h('header', { className: 'wh-top' },
         h('div', null,
