@@ -1034,6 +1034,18 @@ react-is/cjs/react-is.production.js:
               (tm.projects ?? []).length
                 ? h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, `涉及项目：${tm.projects.join('、')}`)
                 : null,
+              (today.events ?? []).length
+                ? h('div', { style: { flex: 1, minHeight: 60, maxHeight: 240, overflowY: 'auto' } },
+                    (today.events ?? []).slice(0, 15).map((e) =>
+                      h('div', {
+                        key: e.id,
+                        title: e.title || '',
+                        style: { display: 'flex', gap: 6, fontSize: 12, padding: '2px 0', alignItems: 'baseline', minWidth: 0 },
+                      },
+                        h('span', { className: 'wh-muted', style: { flex: 'none', fontVariantNumeric: 'tabular-nums' } }, e.time || '--:--'),
+                        h(Chip, { tone: 'neutral' }, typeLabel(e.sourceType)),
+                        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.title || '(无标题)'))))
+                : null,
               summary
                 ? h('div', { style: { borderLeft: '2px solid var(--wh-accent)', paddingLeft: 8 } },
                     h('div', { className: 'wh-muted', style: { fontSize: 11 } },
@@ -1089,7 +1101,8 @@ react-is/cjs/react-is.production.js:
             : null))
 
       return h('div', { className: 'wh-content' },
-        h('div', { className: 'wh-grid2' }, todayCard, periodCard),
+        // 双栏等高（默认 align-items:start 会让左列提前截断、下方留白）
+        h('div', { className: 'wh-grid2', style: { alignItems: 'stretch' } }, todayCard, periodCard),
         scope ? h(GroupView, { groupId: scope, range }) : null)
     }
 
@@ -2616,11 +2629,17 @@ react-is/cjs/react-is.production.js:
                 h('div', { key: w.id, className: 'wh-toolbar', style: { alignItems: 'flex-start', gap: 8 } },
                   h(Chip, { tone: 'brand' }, `${w.hours}h`),
                   h('div', { style: { flex: 1, minWidth: 0 } },
-                    h('div', { style: { fontSize: 12.5 } },
+                    h('div', { style: { fontSize: 12.5, whiteSpace: 'normal' } },
                       w.requirement ? h('span', { style: { fontWeight: 600 } }, `${w.requirement} `) : null,
-                      w.description || '(无描述)'),
+                      w.requirementTitle || w.description || '(无描述)'),
                     h('div', { className: 'wh-muted', style: { fontSize: 11 } },
-                      [w.workType, w.manual ? 'WorkHub 提交' : '云效同步'].filter(Boolean).join(' · '))))))
+                      [
+                        w.workType,
+                        (w.description && w.description !== w.workType && w.description !== (w.requirementTitle || w.description) && w.requirementTitle)
+                          ? w.description
+                          : null,
+                        w.manual ? 'WorkHub 提交' : '云效同步',
+                      ].filter(Boolean).join(' · '))))))
           : h('div', { className: 'wh-muted', style: { fontSize: 12, marginBottom: 10 } }, '当天还没有报工记录'),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
           h('input', {
@@ -2726,7 +2745,9 @@ react-is/cjs/react-is.production.js:
         badges.push(h(CellBadge, {
           key: 'wl',
           tone: 'accent',
-          title: `${d.worklogEntries} 条报工记录`,
+          title: d.worklogNotes?.length
+            ? `报工：${d.worklogNotes.join('；')}`
+            : `${d.worklogEntries} 条报工记录`,
         }, `报 ${d.worklogHours}h`))
       }
       if (!badges.length) return null
