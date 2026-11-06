@@ -954,13 +954,18 @@ react-is/cjs/react-is.production.js:
     function Dashboard({ range, setRange, scope = '' }) {
       const [stats, setStats] = useState(() => (scope ? null : apiCachePeek('/analytics/dashboard?preset=this_week')))
       const [err, setErr] = useState(null)
-      const insights = useInsights({ kind: 'insight' })
+      const [today, setToday] = useState(null)
+      const t = new Date()
+      const todayIso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
       const load = useCallback(() => {
         return api(`/analytics/dashboard?${rangeQuery(range)}${scope ? `&groupId=${encodeURIComponent(scope)}` : ''}`)
           .then((r) => { setStats(r); setRange({ ...range, resolved: r.range }) })
           .catch((e) => setErr(String(e.message)))
       }, [range.preset, range.start, range.end, range.granularity, range.compare, scope])
       useEffect(() => { void load() }, [load])
+      useEffect(() => {
+        api(`/calendar/day?date=${todayIso}&mine=1`).then(setToday).catch(() => setToday(null))
+      }, [todayIso])
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!stats) return h(Loading)
 
@@ -985,16 +990,16 @@ react-is/cjs/react-is.production.js:
       const totalEvents = Object.values(stats.counts).reduce((a, b) => a + b, 0)
       const cmp = stats.compare
       const mainTypes = ['chat_message', 'commit', 'requirement', 'worklog', 'todo', 'attendance']
-        .filter((t) => (stats.counts[t] ?? 0) > 0)
+        .filter((t2) => (stats.counts[t2] ?? 0) > 0)
       const statCards = [
         h(Stat, { key: 'total', label: '工作事件', value: totalEvents, hint: `${stats.range.startDate} ~ ${stats.range.endDate}` }),
         h(Stat, { key: 'projects', label: '活跃项目', value: stats.activeProjects }),
-        ...mainTypes.slice(0, 3).map((t) =>
+        ...mainTypes.slice(0, 3).map((t2) =>
           h(Stat, {
-            key: t,
-            label: typeLabel(t),
-            value: stats.counts[t],
-            accent: typeColor(t),
+            key: t2,
+            label: typeLabel(t2),
+            value: stats.counts[t2],
+            accent: typeColor(t2),
           })),
       ]
 
@@ -1002,65 +1007,90 @@ react-is/cjs/react-is.production.js:
         ? [
             ['工作事件', totalEvents, Object.values(cmp.counts).reduce((a, b) => a + b, 0)],
             ['活跃项目', stats.activeProjects, cmp.activeProjects],
-            ...mainTypes.map((t) => [typeLabel(t), stats.counts[t] ?? 0, cmp.counts[t] ?? 0]),
+            ...mainTypes.map((t2) => [typeLabel(t2), stats.counts[t2] ?? 0, cmp.counts[t2] ?? 0]),
           ]
         : []
 
-      return h('div', { className: 'wh-content' },
-        h(Card, { title: '今日待处理', sub: '钉钉日程 · 到期待办 · 待我审批', style: { marginBottom: 2 } },
-          h(DingTalkToday)),
-        scope ? h(GroupView, { groupId: scope, range }) : null,
-        h('div', { className: 'wh-stats' }, statCards),
-        h('div', { className: 'wh-grid2' },
-          h(Card, { title: '项目投入分布', sub: `${stats.range.startDate} ~ ${stats.range.endDate}` },
-            projRows.length
-              ? h('div', null, projRows.map(([name, v]) =>
+      // 左列「今日工作」：打卡/事件/报工 + 类型分布 + 今日总结 + 待处理
+      const tm = today?.metrics ?? {}
+      const todayTypes = Object.entries(tm.byType ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      const summary = today?.summary
+      const todayCard = h(Card, { title: '今日工作', sub: `${todayIso} · 按我的身份汇总` },
+        !today
+          ? h(Loading)
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+              h('div', { className: 'wh-stats' },
+                h(Stat, {
+                  label: '打卡',
+                  value: tm.checkIn ? `${tm.checkIn}–${tm.checkOut ?? '…'}` : '无记录',
+                  hint: tm.checkIn ? (tm.checkOut ? '上/下班' : '尚未打卡下班') : '今天还没有打卡',
+                }),
+                h(Stat, { label: '工作事件', value: tm.total ?? 0, hint: '只计我的' }),
+                h(Stat, { label: '报工', value: tm.worklogHours ? `${Number(tm.worklogHours).toFixed(1)}h` : '—', hint: `${tm.worklogEntries ?? 0} 条` })),
+              todayTypes.length
+                ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } },
+                    todayTypes.map(([t2, n]) => h(Chip, { key: t2 }, `${typeLabel(t2)} ${n}`)))
+                : h('div', { className: 'wh-muted', style: { fontSize: 12 } }, '今天还没有已采集的工作事件'),
+              (tm.projects ?? []).length
+                ? h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, `涉及项目：${tm.projects.join('、')}`)
+                : null,
+              summary
+                ? h('div', { style: { borderLeft: '2px solid var(--wh-accent)', paddingLeft: 8 } },
+                    h('div', { className: 'wh-muted', style: { fontSize: 11 } },
+                      `每日总结 · ${summary.metrics?.generatedBy === 'ai' ? 'AI' : summary.metrics?.generatedBy === 'chat' ? 'AI 对话' : '规则'}${summary.metrics?.model ? ` · ${summary.metrics.model}` : ''}`),
+                    h('div', {
+                      style: { fontSize: 12, lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
+                    }, summary.overview || '（无概述）'))
+                : h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, '今日总结尚未生成 · 到「工作日历」选中今天可生成'),
+              h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: 8 } },
+                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '待处理 · 钉钉日程 / 到期待办 / 待我审批'),
+                h(DingTalkToday))))
+
+      // 右列「本周工作」（跟随时间范围，默认本周）：区间统计 + 项目投入 + 趋势 + 进行中 + 对比
+      const periodTitle = range.preset === 'this_week' ? '本周工作' : '周期工作'
+      const periodCard = h(Card, { title: periodTitle, sub: `${stats.range.startDate} ~ ${stats.range.endDate} · 粒度 ${GRAN_LABEL[stats.range.granularity] ?? stats.range.granularity}` },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+          h('div', { className: 'wh-stats' }, statCards),
+          projRows.length
+            ? h('div', null,
+                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, `项目投入 · Top ${Math.min(5, projRows.length)}`),
+                projRows.slice(0, 5).map(([name, v]) =>
                   h(BarRow, { key: name, name, value: v.total, max: projMax, color: 'var(--wh-accent)' })))
-              : h(Empty, {
-                  icon: '◎',
-                  title: '尚未配置项目或无关联数据',
-                  hint: '到「项目分析」创建项目并绑定群聊 / 关键词，数据会自动归集',
-                })),
-          h(Card, { title: '工作活动趋势', sub: `粒度 · ${GRAN_LABEL[stats.range.granularity] ?? stats.range.granularity}` },
-            h(StackedBars, { buckets, trend, maxN, bucketRequirements: stats.bucketRequirements }))),
-        (stats.inProgress ?? []).length
-          ? h(Card, {
-              title: `进行中需求 · ${stats.inProgress.length}`,
-              sub: `${stats.range.startDate} ~ ${stats.range.endDate} 内有更新 · 只看与我相关 · 非终态，按最近更新倒序`,
-            },
-              stats.inProgress.map((r) => h(RequirementRow, { key: r.source_id, r })))
-          : stats.identityConfigured === false
-            ? h(Card, { title: '进行中需求' },
-                h(Empty, { icon: '◎', title: '未配置「我的身份」', hint: '到「数据管理 → 我的身份」填入你的名字，这里只显示与你相关的进行中需求' }))
-            : null,
-        cmp
-          ? h(Card, {
-              title: '周期对比',
-              sub: `本期 ${stats.range.startDate} ~ ${stats.range.endDate} · 上期 ${cmp.range.startDate} ~ ${cmp.range.endDate}`,
-            },
-              h('table', { className: 'wh-table' },
-                h('thead', null, h('tr', null,
-                  h('th', null, '指标'), h('th', null, '上期'), h('th', null, '本期'), h('th', null, '变化'))),
-                h('tbody', null, compareRows.map(([label, now, before]) =>
-                  h('tr', { key: label },
-                    h('td', null, label),
-                    h('td', { className: 'wh-muted' }, String(before)),
-                    h('td', null, String(now)),
-                    h('td', null, h(Delta, { value: now - before })))))))
-          : null,
-        h(Card, {
-          title: 'AI 工作洞察',
-          sub: '规则引擎与 Agent 生成的带来源结论',
-        },
-          (insights ?? []).length
-            ? h('div', { className: 'wh-list' }, insights.map((a) => h(InsightCard, { key: a.id, a })))
             : h(Empty, {
-                icon: '✦',
-                title: '暂无洞察',
-                hint: '在 DSH 对话中说「分析一下 AI 基建项目并保存洞察」，Agent 会读取数据并生成带来源的结论',
-              })),
-        h('div', { className: 'wh-muted', style: { textAlign: 'center', paddingTop: 2 } },
-          '统计为确定性 SQL 计算 · AI 结论文本均携带来源证据'))
+                icon: '◎',
+                title: '尚未配置项目或无关联数据',
+                hint: '到「项目分析」创建项目并绑定群聊 / 关键词，数据会自动归集',
+              }),
+          h('div', null,
+            h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '活动趋势'),
+            h(StackedBars, { buckets, trend, maxN, bucketRequirements: stats.bucketRequirements })),
+          (stats.inProgress ?? []).length
+            ? h('div', null,
+                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } },
+                  `进行中需求 · ${stats.inProgress.length}（只看与我相关）`),
+                stats.inProgress.slice(0, 5).map((r) => h(RequirementRow, { key: r.source_id, r })))
+            : stats.identityConfigured === false
+              ? h('div', { className: 'wh-muted', style: { fontSize: 11.5 } },
+                  '未配置「我的身份」：到「数据管理 → 我的身份」填入你的名字，进行中需求将只显示与你相关的')
+              : null,
+          cmp
+            ? h('div', null,
+                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } },
+                  `周期对比 · 上期 ${cmp.range.startDate} ~ ${cmp.range.endDate}`),
+                h('table', { className: 'wh-table' },
+                  h('thead', null, h('tr', null,
+                    h('th', null, '指标'), h('th', null, '上期'), h('th', null, '本期'), h('th', null, '变化'))),
+                  h('tbody', null, compareRows.map(([label, now, before]) =>
+                    h('tr', { key: label },
+                      h('td', null, label),
+                      h('td', { className: 'wh-muted' }, String(before)),
+                      h('td', null, String(now)),
+                      h('td', null, h(Delta, { value: now - before })))))))
+            : null))
+
+      return h('div', { className: 'wh-content' },
+        h('div', { className: 'wh-grid2' }, todayCard, periodCard),
+        scope ? h(GroupView, { groupId: scope, range }) : null)
     }
 
     /* -------------------------- source cards ---------------------------- */
@@ -2293,6 +2323,8 @@ react-is/cjs/react-is.production.js:
       const [expanded, setExpanded] = useState(false)
       const [tab, setTab] = useState('summary')
       const [busyDay, setBusyDay] = useState(false)
+      const [wlText, setWlText] = useState('')
+      const [busyWl, setBusyWl] = useState(false)
       const reload = useCallback(() => {
         setData(null); setErr(null)
         const q = new URLSearchParams({ date })
@@ -2308,10 +2340,37 @@ react-is/cjs/react-is.production.js:
       const refreshDay = async () => {
         setBusyDay(true)
         try {
-          await api('/sync/run', { method: 'POST', body: JSON.stringify({ sources: ['dws.attendance', 'dws.calendar'] }) })
+          await api('/sync/run', { method: 'POST', body: JSON.stringify({ sources: ['dws.attendance', 'dws.calendar', 'yunxiao.worklogs'] }) })
           onDataRefreshed?.()
-          toast('该日数据已刷新（考勤 + 钉钉日程）')
+          toast('该日数据已刷新（考勤 + 钉钉日程 + 云效报工）')
         } catch (e) { toast(`刷新失败: ${e.message}`, 'bad') } finally { setBusyDay(false) }
+      }
+
+      /* 一句话报工：本地解析需求号与时长做确认，服务端解析一致并调云效 CreateEffortRecord */
+      const wlPreview = (() => {
+        const text = wlText.trim()
+        if (!text) return null
+        const serial = (/\b([A-Z]{2,6}PRO-\d+)\b/.exec(text) || /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/.exec(text))?.[1] ?? null
+        const hm = /(?<![-\w])(\d+(?:\.\d+)?)\s*(?:个小时|小时|h(?![a-zA-Z0-9]))/i.exec(text)
+        const dm = /(?<![-\w])(\d+(?:\.\d+)?)\s*个?天/.exec(text)
+        const v = hm ? parseFloat(hm[1]) : dm ? parseFloat(dm[1]) * 8 : 1
+        const hours = Math.min(24, Math.max(0.5, Math.round(v * 10) / 10))
+        return { serial, hours }
+      })()
+      const submitWorklog = async () => {
+        const text = wlText.trim()
+        if (!text || busyWl) return
+        if (!wlPreview?.serial) { toast('未识别到需求号（示例：QYPRO-509 联调 2 小时）', 'bad'); return }
+        if (!(await whConfirm('提交云效报工？',
+          `${wlPreview.serial} · ${wlPreview.hours}h · ${date}\n「${text}」`,
+          { okText: '提交报工' }))) return
+        setBusyWl(true)
+        try {
+          const r = await api('/worklog/submit', { method: 'POST', body: JSON.stringify({ date, text }) })
+          toast(`已报工 ${r.serial} · ${r.hours}h（云效已登记）`)
+          setWlText('')
+          onDataRefreshed?.()
+        } catch (e) { toast(`报工失败：${e.message}`, 'bad') } finally { setBusyWl(false) }
       }
 
       const quickGenerate = async () => {
@@ -2544,6 +2603,46 @@ react-is/cjs/react-is.production.js:
         : h(Empty, { icon: '◌', title: '当日无工作事件' })
 
       const inProgress = data.inProgress ?? []
+      // 云效报工：当天明细 + 一句话快速报工
+      const worklogs = data.worklogs ?? []
+      const wlTotal = Math.round(worklogs.reduce((a, w) => a + (w.hours ?? 0), 0) * 10) / 10
+      const worklogCard = h(Card, {
+        title: `云效报工 · ${worklogs.length ? `${wlTotal}h / ${worklogs.length} 条` : '当天暂无'}`,
+        sub: '实际工时登记（云效 Projex）· 下面输入一句话即可报工',
+      },
+        worklogs.length
+          ? h('div', { className: 'wh-list', style: { marginBottom: 10 } },
+              worklogs.map((w) =>
+                h('div', { key: w.id, className: 'wh-toolbar', style: { alignItems: 'flex-start', gap: 8 } },
+                  h(Chip, { tone: 'brand' }, `${w.hours}h`),
+                  h('div', { style: { flex: 1, minWidth: 0 } },
+                    h('div', { style: { fontSize: 12.5 } },
+                      w.requirement ? h('span', { style: { fontWeight: 600 } }, `${w.requirement} `) : null,
+                      w.description || '(无描述)'),
+                    h('div', { className: 'wh-muted', style: { fontSize: 11 } },
+                      [w.workType, w.manual ? 'WorkHub 提交' : '云效同步'].filter(Boolean).join(' · '))))))
+          : h('div', { className: 'wh-muted', style: { fontSize: 12, marginBottom: 10 } }, '当天还没有报工记录'),
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          h('input', {
+            value: wlText,
+            onChange: (e) => setWlText(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void submitWorklog() } },
+            placeholder: '一句话报工：QYPRO-509 联调接口 2 小时（时长缺省 1h，支持 0.5天）',
+            disabled: busyWl,
+            style: {
+              flex: 1, minWidth: 0, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l1)',
+              background: 'var(--dsw-alias-fill-secondary)', color: 'var(--dsw-alias-label-primary)',
+              padding: '6px 10px', fontSize: 12.5,
+            },
+          }),
+          wlPreview && wlText.trim()
+            ? h('span', { className: 'wh-chip neutral', title: '解析结果（提交前请确认）' },
+                `${wlPreview.serial ?? '⚠ 未识别需求号'} · ${wlPreview.hours}h`)
+            : null,
+          h(Btn, {
+            variant: 'primary', disabled: busyWl || !wlText.trim(), onClick: submitWorklog,
+            title: '解析需求号与时长后，登记到云效实际工时（二次确认）',
+          }, busyWl ? '提交中…' : '报工')))
       const summaryCard = h(Card, {
         title: `${date} 每日总结`,
         sub: [
@@ -2584,14 +2683,14 @@ react-is/cjs/react-is.production.js:
         h(Tabs, {
           tabs: [
             ['summary', '总结'],
-            ['req', `需求 · ${inProgress.length + milestones.length}`],
+            ['req', `需求/报工 · ${inProgress.length + milestones.length + worklogs.length}`],
             ['events', `事件 · ${data.events.length}`],
           ],
           active: tab,
           onChange: setTab,
         }),
         tab === 'summary' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, summaryCard, meetingBlock) : null,
-        tab === 'req' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, inProgressCard, milestoneBlock) : null,
+        tab === 'req' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, inProgressCard, worklogCard, milestoneBlock) : null,
         tab === 'events' ? timelineCard : null)
     }
 
@@ -3226,6 +3325,7 @@ react-is/cjs/react-is.production.js:
       const [input, setInput] = useState('')
       const [streaming, setStreaming] = useState(false)
       const [err, setErr] = useState(null)
+      const [adopting, setAdopting] = useState('')
 
       const reloadChats = () => api('/ai/chats').then((r) => setChats(r.chats ?? [])).catch(() => setChats([]))
       useEffect(() => { void reloadChats() }, [])
@@ -3317,6 +3417,16 @@ react-is/cjs/react-is.production.js:
         void reloadChats()
       }
 
+      /** 把一条 AI 回答采纳为日报总结 / 周报草稿 */
+      const adopt = async (m, target) => {
+        if (adopting) return
+        setAdopting(`${m.id}:${target}`)
+        try {
+          const r = await api('/ai/chat/adopt', { method: 'POST', body: JSON.stringify({ chatId: activeId, messageId: m.id, target }) })
+          toast(target === 'daily' ? `已写入 ${r.date} 的每日总结（工作日历可见）` : '已写入周报草稿（智能报告可见）')
+        } catch (e) { toast(`写入失败：${e.message}`, 'bad') } finally { setAdopting('') }
+      }
+
       const unavailable = models === null
       const sel = models?.selection
       const modelChip = sel
@@ -3341,7 +3451,24 @@ react-is/cjs/react-is.production.js:
             m.streaming && m.content ? h('div', { className: 'wh-muted' }, '▍') : null,
             m.error ? h('div', { style: { color: 'var(--wh-bad)', marginTop: 4, fontSize: 12 } }, `生成失败：${m.error}`) : null,
             m.aborted && !m.streaming ? h('div', { className: 'wh-muted', style: { marginTop: 4, fontSize: 11 } }, '· 已停止（内容不完整）') : null,
-            !m.streaming && m.model ? h('div', { className: 'wh-muted', style: { marginTop: 4, fontSize: 11 } }, m.model) : null)
+            !m.streaming && m.model ? h('div', { className: 'wh-muted', style: { marginTop: 4, fontSize: 11 } }, m.model) : null,
+            !m.streaming && m.content && !m.error
+              ? h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
+                  h('button', {
+                    className: 'wh-chip neutral',
+                    style: { cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-fill-quaternary)' },
+                    disabled: adopting === `${m.id}:daily`,
+                    title: '把这条回答写入今天的每日总结（工作日历 / 智能报告可见）',
+                    onClick: () => void adopt(m, 'daily'),
+                  }, adopting === `${m.id}:daily` ? '写入中…' : '✎ 写入日报'),
+                  h('button', {
+                    className: 'wh-chip neutral',
+                    style: { cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-fill-quaternary)' },
+                    disabled: adopting === `${m.id}:weekly`,
+                    title: '把这条回答保存为周报草稿（智能报告可见）',
+                    onClick: () => void adopt(m, 'weekly'),
+                  }, adopting === `${m.id}:weekly` ? '写入中…' : '✎ 写入周报'))
+              : null)
 
       return h('div', { className: 'wh-content' },
         h(Card, { title: 'AI 对话', sub: '基于本地工作数据问答 · 模型与凭证全部来自 DSH 配置', action: modelChip },
