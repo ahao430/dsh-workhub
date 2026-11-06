@@ -2542,7 +2542,8 @@ react-is/cjs/react-is.production.js:
         for (const c of tlCommits) {
           const title = String(c.title ?? '')
           if (/^Merge\b/i.test(title)) { merges += 1; continue }
-          const m = REQ_RE.exec(title)
+          // 需求号：标题优先，分支名兜底（feature/QYPRO-511）
+          const m = REQ_RE.exec(title) || REQ_RE.exec(String(c.branch ?? ''))
           const key = m ? m[1] : '其他改动'
           const cur = g.get(key) ?? { key, count: 0, titles: [] }
           cur.count += 1
