@@ -1039,7 +1039,7 @@ react-is/cjs/react-is.production.js:
       const tm = today?.metrics ?? {}
       const todayTypes = Object.entries(tm.byType ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5)
       const summary = today?.summary
-      const todayCard = h(Card, { title: '今日工作', sub: `${todayIso} · 按我的身份汇总` },
+      const todayCard = h(Card, { title: '今日工作', sub: `${todayIso} · 按我的身份汇总`, style: { minWidth: 0 } },
         !today
           ? h(Loading)
           : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
@@ -1059,8 +1059,8 @@ react-is/cjs/react-is.production.js:
                 ? h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, `涉及项目：${tm.projects.join('、')}`)
                 : null,
               (today.events ?? []).length
-                ? h('div', { style: { flex: 1, minHeight: 60, maxHeight: 240, overflowY: 'auto' } },
-                    (today.events ?? []).slice(0, 15).map((e) =>
+                ? h('div', { style: { flex: 1, minHeight: 50, maxHeight: 160, overflowY: 'auto' } },
+                    (today.events ?? []).slice(0, 8).map((e) =>
                       h('div', {
                         key: e.id,
                         title: e.title || '',
@@ -1080,17 +1080,21 @@ react-is/cjs/react-is.production.js:
                 : h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, '今日总结尚未生成 · 到「工作日历」选中今天可生成'),
               h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: 8 } },
                 h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '待处理 · 钉钉日程 / 到期待办 / 待我审批'),
-                h(DingTalkToday))))
+                h('div', { style: { maxHeight: 200, overflowY: 'auto' } }, h(DingTalkToday)))))
 
       // 右列「本周工作」（跟随时间范围，默认本周）：区间统计 + 项目投入 + 趋势 + 进行中 + 对比
       const periodTitle = range.preset === 'this_week' ? '本周工作' : '周期工作'
-      const periodCard = h(Card, { title: periodTitle, sub: `${stats.range.startDate} ~ ${stats.range.endDate} · 粒度 ${GRAN_LABEL[stats.range.granularity] ?? stats.range.granularity}` },
+      const periodCard = h(Card, {
+        title: periodTitle,
+        sub: `${stats.range.startDate} ~ ${stats.range.endDate} · 粒度 ${GRAN_LABEL[stats.range.granularity] ?? stats.range.granularity}`,
+        style: { minWidth: 0 },
+      },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
           h('div', { className: 'wh-stats' }, statCards),
           projRows.length
             ? h('div', null,
-                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, `项目投入 · Top ${Math.min(5, projRows.length)}`),
-                projRows.slice(0, 5).map(([name, v]) =>
+                h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, `项目投入 · Top ${Math.min(4, projRows.length)}`),
+                projRows.slice(0, 4).map(([name, v]) =>
                   h(BarRow, { key: name, name, value: v.total, max: projMax, color: 'var(--wh-accent)' })))
             : h(Empty, {
                 icon: '◎',
@@ -1104,7 +1108,7 @@ react-is/cjs/react-is.production.js:
             ? h('div', null,
                 h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } },
                   `进行中需求 · ${stats.inProgress.length}（只看与我相关）`),
-                stats.inProgress.slice(0, 5).map((r) => h(RequirementRow, { key: r.source_id, r })))
+                stats.inProgress.slice(0, 4).map((r) => h(RequirementRow, { key: r.source_id, r })))
             : stats.identityConfigured === false
               ? h('div', { className: 'wh-muted', style: { fontSize: 11.5 } },
                   '未配置「我的身份」：到「数据管理 → 我的身份」填入你的名字，进行中需求将只显示与你相关的')
@@ -1187,8 +1191,12 @@ react-is/cjs/react-is.production.js:
 
       return h('div', { className: 'wh-content' },
         banner,
-        // 双栏等高（默认 align-items:start 会让左列提前截断、下方留白）
-        h('div', { className: 'wh-grid2', style: { alignItems: 'stretch' } }, todayCard, periodCard),
+        // 双栏等高 + 左窄右宽（今日=列表型内容，本周=统计/趋势需要宽度）；
+        // minmax(0,·) 防止长内容把列撑破
+        h('div', {
+          className: 'wh-grid2',
+          style: { alignItems: 'stretch', gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.1fr)' },
+        }, todayCard, periodCard),
         weekTable,
         scope ? h(GroupView, { groupId: scope, range }) : null)
     }
