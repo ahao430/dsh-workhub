@@ -955,9 +955,16 @@ react-is/cjs/react-is.production.js:
       const [stats, setStats] = useState(() => (scope ? null : apiCachePeek('/analytics/dashboard?preset=this_week')))
       const [err, setErr] = useState(null)
       const [today, setToday] = useState(null)
+      // 「今日/昨日」切换：凌晨 0-5 点默认看昨天（刚过 0 点仍想回顾刚结束的一天）
+      const [dayOffset, setDayOffset] = useState(() => (new Date().getHours() < 5 ? 1 : 0))
       const [weekDays, setWeekDays] = useState(null) // 本周一~今天的月历日数据（横幅+速览表共用）
       const t = new Date()
       const todayIso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+      const focusIso = (() => {
+        const d = new Date(t)
+        d.setDate(d.getDate() - dayOffset)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })()
       const load = useCallback(() => {
         return api(`/analytics/dashboard?${rangeQuery(range)}${scope ? `&groupId=${encodeURIComponent(scope)}` : ''}`)
           .then((r) => { setStats(r); setRange({ ...range, resolved: r.range }) })
@@ -965,8 +972,8 @@ react-is/cjs/react-is.production.js:
       }, [range.preset, range.start, range.end, range.granularity, range.compare, scope])
       useEffect(() => { void load() }, [load])
       useEffect(() => {
-        api(`/calendar/day?date=${todayIso}&mine=1`).then(setToday).catch(() => setToday(null))
-      }, [todayIso])
+        api(`/calendar/day?date=${focusIso}&mine=1`).then(setToday).catch(() => setToday(null))
+      }, [focusIso])
       // 本周逐日数据：本周一~今天（跨月时拉两个月）
       const mondayOf = (() => {
         const d = new Date(t)
@@ -981,7 +988,7 @@ react-is/cjs/react-is.production.js:
       })()
       useEffect(() => {
         const mon = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-        const months = [...new Set([mon(t), mon(mondayOf)])]
+        const months = [...new Set([mon(t), mon(mondayOf), mon(new Date(t.getFullYear(), t.getMonth(), t.getDate() - dayOffset))])]
         Promise.all(months.map((m) => api(`/calendar?month=${m}`).then((r) => r.days ?? []).catch(() => [])))
           .then((all) => {
             const map = {}
@@ -1039,7 +1046,14 @@ react-is/cjs/react-is.production.js:
       const tm = today?.metrics ?? {}
       const todayTypes = Object.entries(tm.byType ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5)
       const summary = today?.summary
-      const todayCard = h(Card, { title: '今日工作', sub: `${todayIso} · 按我的身份汇总`, style: { minWidth: 0 } },
+      const todayCard = h(Card, {
+        title: dayOffset ? '昨日工作' : '今日工作',
+        sub: `${focusIso} · 按我的身份汇总`,
+        style: { minWidth: 0 },
+        action: h('div', { className: 'wh-toolbar', style: { gap: 4 } },
+          h(Btn, { size: 'sm', variant: dayOffset === 0 ? 'primary' : 'ghost', onClick: () => setDayOffset(0) }, '今天'),
+          h(Btn, { size: 'sm', variant: dayOffset === 1 ? 'primary' : 'ghost', onClick: () => setDayOffset(1), title: '刚过 0 点回顾刚结束的一天' }, '昨天')),
+      },
         !today
           ? h(Loading)
           : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
@@ -1077,7 +1091,7 @@ react-is/cjs/react-is.production.js:
                     h('div', {
                       style: { fontSize: 12, lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
                     }, summary.overview || '（无概述）'))
-                : h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, '今日总结尚未生成 · 到「工作日历」选中今天可生成'),
+                : h('div', { className: 'wh-muted', style: { fontSize: 11.5 } }, '当日总结尚未生成 · 到「工作日历」选中该日可生成'),
               h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: 8 } },
                 h('div', { className: 'wh-muted', style: { fontSize: 11, marginBottom: 4 } }, '待处理 · 钉钉日程 / 到期待办 / 待我审批'),
                 h('div', { style: { maxHeight: 200, overflowY: 'auto' } }, h(DingTalkToday)))))
@@ -1134,7 +1148,7 @@ react-is/cjs/react-is.production.js:
         : 0
       const weekWorkdays = weekDates.filter((d) => ![0, 6].includes(new Date(`${d}T12:00:00`).getDay())).length
       const weekTarget = weekWorkdays * 8
-      const todayLogged = (weekDays?.[todayIso]?.worklogEntries ?? 0) > 0
+      const todayLogged = (weekDays?.[focusIso]?.worklogEntries ?? 0) > 0
       const banner = h(Card, { style: { padding: '10px 14px' } },
         h('div', { className: 'wh-toolbar', style: { flexWrap: 'wrap', gap: 10 } },
           h('span', { style: { fontWeight: 600, whiteSpace: 'nowrap' } }, `本周报工 ${weekLogHours}h`),
@@ -1155,7 +1169,9 @@ react-is/cjs/react-is.production.js:
             `目标 ${weekTarget}h（${weekWorkdays} 个工作日 × 8h）`),
           weekDays
             ? h(Chip, { tone: todayLogged ? 'ok' : 'warn' },
-                todayLogged ? `今日已报 ${weekDays[todayIso]?.worklogHours ?? 0}h` : '今日未报工')
+                todayLogged
+                  ? `${dayOffset ? '昨日' : '今日'}已报 ${weekDays[focusIso]?.worklogHours ?? 0}h`
+                  : `${dayOffset ? '昨日' : '今日'}未报工`)
             : null,
           h('span', { style: { flex: 1 } }),
           h(Btn, { size: 'sm', variant: 'ghost', onClick: () => navigate?.('calendar'), title: '到工作日历选中今天，可一句话报工' }, '去报工'),
