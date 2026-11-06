@@ -951,10 +951,11 @@ react-is/cjs/react-is.production.js:
           : null)
     }
 
-    function Dashboard({ range, setRange, scope = '' }) {
+    function Dashboard({ range, setRange, scope = '', navigate }) {
       const [stats, setStats] = useState(() => (scope ? null : apiCachePeek('/analytics/dashboard?preset=this_week')))
       const [err, setErr] = useState(null)
       const [today, setToday] = useState(null)
+      const [weekDays, setWeekDays] = useState(null) // 本周一~今天的月历日数据（横幅+速览表共用）
       const t = new Date()
       const todayIso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
       const load = useCallback(() => {
@@ -965,6 +966,29 @@ react-is/cjs/react-is.production.js:
       useEffect(() => { void load() }, [load])
       useEffect(() => {
         api(`/calendar/day?date=${todayIso}&mine=1`).then(setToday).catch(() => setToday(null))
+      }, [todayIso])
+      // 本周逐日数据：本周一~今天（跨月时拉两个月）
+      const mondayOf = (() => {
+        const d = new Date(t)
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+        return d
+      })()
+      const weekDates = (() => {
+        const out = []
+        const d = new Date(mondayOf)
+        while (d <= t) { out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); d.setDate(d.getDate() + 1) }
+        return out
+      })()
+      useEffect(() => {
+        const mon = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        const months = [...new Set([mon(t), mon(mondayOf)])]
+        Promise.all(months.map((m) => api(`/calendar?month=${m}`).then((r) => r.days ?? []).catch(() => [])))
+          .then((all) => {
+            const map = {}
+            for (const ds of all) for (const d of ds) map[d.date] = d
+            setWeekDays(map)
+          })
+          .catch(() => setWeekDays({}))
       }, [todayIso])
       if (err) return h(Card, { title: '加载失败' }, h('div', { style: { color: 'var(--wh-bad)' } }, err))
       if (!stats) return h(Loading)
@@ -1100,9 +1124,72 @@ react-is/cjs/react-is.production.js:
                       h('td', null, h(Delta, { value: now - before })))))))
             : null))
 
+      // 顶部横幅：本周报工进度（周五要交的东西，放首屏最显眼处）
+      const weekLogHours = weekDays
+        ? Math.round(weekDates.reduce((a, d) => a + (weekDays[d]?.worklogHours ?? 0), 0) * 10) / 10
+        : 0
+      const weekWorkdays = weekDates.filter((d) => ![0, 6].includes(new Date(`${d}T12:00:00`).getDay())).length
+      const weekTarget = weekWorkdays * 8
+      const todayLogged = (weekDays?.[todayIso]?.worklogEntries ?? 0) > 0
+      const banner = h(Card, { style: { padding: '10px 14px' } },
+        h('div', { className: 'wh-toolbar', style: { flexWrap: 'wrap', gap: 10 } },
+          h('span', { style: { fontWeight: 600, whiteSpace: 'nowrap' } }, `本周报工 ${weekLogHours}h`),
+          weekDays ? h('div', {
+            style: {
+              flex: 1, minWidth: 120, height: 8, borderRadius: 4, alignSelf: 'center',
+              background: 'var(--dsw-alias-fill-quaternary)', overflow: 'hidden',
+            },
+          },
+            h('div', {
+              style: {
+                width: `${Math.min(100, weekTarget ? (weekLogHours / weekTarget) * 100 : 0)}%`, height: '100%',
+                background: weekLogHours >= weekTarget ? 'var(--wh-ok)' : 'var(--wh-accent)',
+                transition: 'width .3s',
+              },
+            })) : null,
+          h('span', { className: 'wh-muted', style: { fontSize: 12, whiteSpace: 'nowrap' } },
+            `目标 ${weekTarget}h（${weekWorkdays} 个工作日 × 8h）`),
+          weekDays
+            ? h(Chip, { tone: todayLogged ? 'ok' : 'warn' },
+                todayLogged ? `今日已报 ${weekDays[todayIso]?.worklogHours ?? 0}h` : '今日未报工')
+            : null,
+          h('span', { style: { flex: 1 } }),
+          h(Btn, { size: 'sm', variant: 'ghost', onClick: () => navigate?.('calendar'), title: '到工作日历选中今天，可一句话报工' }, '去报工'),
+          h(Btn, { size: 'sm', variant: 'ghost', onClick: () => navigate?.('ai'), title: '基于工作数据问答' }, '问 AI 助手')))
+
+      // 底部：本周逐日速览（打卡/提交/事件/报工/主力需求，一屏看完一周）
+      const WD = ['一', '二', '三', '四', '五', '六', '日']
+      const weekTable = h(Card, {
+        title: `本周速览 · ${weekDates[0] ?? ''} ~ ${todayIso}`,
+        sub: '打卡 / 提交 / 事件 / 报工 / 当日主力需求（按我的身份）',
+      },
+        !weekDays
+          ? h(Loading)
+          : h('table', { className: 'wh-table' },
+              h('thead', null, h('tr', null,
+                ['日期', '打卡', '提交', '事件', '报工', '主力需求'].map((x) => h('th', { key: x }, x)))),
+              h('tbody', null, weekDates.map((d) => {
+                const row = weekDays[d]
+                const isToday = d === todayIso
+                const dow = WD[(new Date(`${d}T12:00:00`).getDay() + 6) % 7]
+                const topReq = row?.topRequirement?.serial
+                return h('tr', {
+                  key: d,
+                  style: isToday ? { background: 'var(--dsw-alias-fill-quaternary)' } : undefined,
+                },
+                  h('td', null, `${d.slice(5)} 周${dow}${isToday ? ' · 今天' : ''}`),
+                  h('td', { className: 'wh-muted' }, row?.checkIn ? `${row.checkIn}–${row.checkOut ?? '…'}` : '–'),
+                  h('td', null, row?.commits ? `${row.commits}` : '–'),
+                  h('td', null, row?.events ? `${row.events}` : '–'),
+                  h('td', null, row?.worklogHours ? `${row.worklogHours}h` : '–'),
+                  h('td', { title: (row?.topReqs ?? []).map((x) => `${x.serial}×${x.count}`).join('、') }, topReq ?? '–'))
+              }))))
+
       return h('div', { className: 'wh-content' },
+        banner,
         // 双栏等高（默认 align-items:start 会让左列提前截断、下方留白）
         h('div', { className: 'wh-grid2', style: { alignItems: 'stretch' } }, todayCard, periodCard),
+        weekTable,
         scope ? h(GroupView, { groupId: scope, range }) : null)
     }
 
@@ -4345,7 +4432,7 @@ react-is/cjs/react-is.production.js:
         usesTime ? h(TimeBar, { range, onChange: setRange }) : null)
 
       const pageProps = current[0] === 'dashboard'
-        ? { range, setRange, scope }
+        ? { range, setRange, scope, navigate: setPage }
         : current[0] === 'efficiency' || current[0] === 'reports' || current[0] === 'projects'
           ? { range }
           : current[0] === 'calendar'
