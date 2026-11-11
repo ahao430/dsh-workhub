@@ -958,6 +958,7 @@ react-is/cjs/react-is.production.js:
       // 「今日/昨日」切换：凌晨 0-5 点默认看昨天（刚过 0 点仍想回顾刚结束的一天）
       const [dayOffset, setDayOffset] = useState(() => (new Date().getHours() < 5 ? 1 : 0))
       const [weekDays, setWeekDays] = useState(null) // 本周一~今天的月历日数据（横幅+速览表共用）
+      const [dt, setDt] = useState(null) // 横幅徽标：当日日程/到期待办/待我审批计数（与左列共用缓存）
       const t = new Date()
       const todayIso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
       const focusIso = (() => {
@@ -973,6 +974,9 @@ react-is/cjs/react-is.production.js:
       useEffect(() => { void load() }, [load])
       useEffect(() => {
         api(`/calendar/day?date=${focusIso}&mine=1`).then(setToday).catch(() => setToday(null))
+      }, [focusIso])
+      useEffect(() => {
+        loadDingTalkToday(focusIso).then(setDt).catch(() => setDt(null))
       }, [focusIso])
       // 本周逐日数据：本周一~今天（跨月时拉两个月）
       const mondayOf = (() => {
@@ -1173,6 +1177,9 @@ react-is/cjs/react-is.production.js:
                   ? `${dayOffset ? '昨日' : '今日'}已报 ${weekDays[focusIso]?.worklogHours ?? 0}h`
                   : `${dayOffset ? '昨日' : '今日'}未报工`)
             : null,
+          dt?.approvals?.length ? h(Chip, { tone: 'warn', title: '待我审批（钉钉）' }, `待审批 ${dt.approvals.length}`) : null,
+          dt?.todos?.length ? h(Chip, { tone: 'warn', title: '今天到期的待办' }, `到期待办 ${dt.todos.length}`) : null,
+          dt?.events?.length ? h(Chip, { tone: 'brand', title: '今天日程数' }, `日程 ${dt.events.length}`) : null,
           h('span', { style: { flex: 1 } }),
           h(Btn, { size: 'sm', variant: 'ghost', onClick: () => navigate?.('calendar'), title: '到工作日历选中今天，可一句话报工' }, '去报工'),
           h(Btn, { size: 'sm', variant: 'ghost', onClick: () => navigate?.('ai'), title: '基于工作数据问答' }, '问 AI 助手')))
@@ -1181,13 +1188,13 @@ react-is/cjs/react-is.production.js:
       const WD = ['一', '二', '三', '四', '五', '六', '日']
       const weekTable = h(Card, {
         title: `本周速览 · ${weekDates[0] ?? ''} ~ ${todayIso}`,
-        sub: '打卡 / 提交 / 事件 / 报工 / 当日主力需求（按我的身份）',
+        sub: '打卡 / 提交 / 事件 / 聊天 / 报工 / 当日主力需求（按我的身份）',
       },
         !weekDays
           ? h(Loading)
           : h('table', { className: 'wh-table' },
               h('thead', null, h('tr', null,
-                ['日期', '打卡', '提交', '事件', '报工', '主力需求'].map((x) => h('th', { key: x }, x)))),
+                ['日期', '打卡', '提交', '事件', '聊天', '报工', '主力需求'].map((x) => h('th', { key: x }, x)))),
               h('tbody', null, weekDates.map((d) => {
                 const row = weekDays[d]
                 const isToday = d === todayIso
@@ -1201,6 +1208,7 @@ react-is/cjs/react-is.production.js:
                   h('td', { className: 'wh-muted' }, row?.checkIn ? `${row.checkIn}–${row.checkOut ?? '…'}` : '–'),
                   h('td', null, row?.commits ? `${row.commits}` : '–'),
                   h('td', null, row?.events ? `${row.events}` : '–'),
+                  h('td', { className: 'wh-muted' }, row?.chats ? `${row.chats}` : '–'),
                   h('td', null, row?.worklogHours ? `${row.worklogHours}h` : '–'),
                   h('td', { title: (row?.topReqs ?? []).map((x) => `${x.serial}×${x.count}`).join('、') }, topReq ?? '–'))
               }))))
@@ -3737,21 +3745,26 @@ react-is/cjs/react-is.production.js:
     /* 今日待处理（钉钉整合卡）：今日日程 + 到期待办 + 待我审批；
      * 同日期 60s 内读缓存（驾驶舱/日历多处挂载共用，/dt/* 每次 3 个 dws 子进程，很贵），
      * 面板内完成/审批后 force 刷新。 */
-    const dtMem = { date: null, data: null, at: 0 }
+    const dtMem = { date: null, data: null, at: 0, inflight: null, inflightDate: null }
     const dtMemFresh = (date) => dtMem.date === date && dtMem.data && Date.now() - dtMem.at < 60_000
     const isoDay = (ts) => { const d = new Date(Number(ts)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
     function loadDingTalkToday(date, { force = false } = {}) {
       const target = date ?? isoDay(Date.now())
       if (!force && dtMemFresh(target)) return Promise.resolve(dtMem.data)
-      return Promise.all([
+      // 并发去重：横幅徽标与左列「待处理」同时挂载时共享一次拉取
+      if (!force && dtMem.inflight && dtMem.inflightDate === target) return dtMem.inflight
+      const p = Promise.all([
         api(`/dt/agenda?start=${encodeURIComponent(`${target}T00:00:00+08:00`)}&end=${encodeURIComponent(`${target}T23:59:00+08:00`)}`).then((r) => r.events ?? []).catch(() => []),
         api('/dt/todos?scope=my').then((r) => (r.todos ?? []).filter((t) => !t.done && t.dueTime && isoDay(t.dueTime) === target)).catch(() => []),
         api('/dt/approvals?scope=pending').then((r) => r.approvals ?? []).catch(() => []),
       ]).then(([events, todos, approvals]) => {
         const data = { events, todos, approvals }
         dtMem.date = target; dtMem.data = data; dtMem.at = Date.now()
+        dtMem.inflight = null; dtMem.inflightDate = null
         return data
-      })
+      }).catch((e) => { dtMem.inflight = null; dtMem.inflightDate = null; throw e })
+      dtMem.inflight = p; dtMem.inflightDate = target
+      return p
     }
     function DingTalkToday({ date, refreshKey = 0 }) {
       const [data, setData] = useState(null)
